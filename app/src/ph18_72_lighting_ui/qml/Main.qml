@@ -634,13 +634,20 @@ ApplicationWindow {
 
                                                     background: Rectangle {
                                                         radius: 6
-                                                        color: root.selectedCoverSegment === modelData.name ? "#31404e" : "#182028"
+                                                        color: {
+                                                            const version = lightingUiModel.coverLogoStateVersion
+                                                            return lightingUiModel.coverLogoButtonColor(modelData.name)
+                                                        }
                                                         border.color: root.selectedCoverSegment === modelData.name ? "#84a1bc" : "#2a323b"
+                                                        border.width: root.selectedCoverSegment === modelData.name ? 2 : 1
                                                     }
 
                                                     contentItem: Label {
                                                         text: parent.text
-                                                        color: "#eef2f7"
+                                                        color: {
+                                                            const version = lightingUiModel.coverLogoStateVersion
+                                                            return lightingUiModel.coverLogoButtonTextColor(modelData.name)
+                                                        }
                                                         font.pixelSize: 14
                                                         font.bold: true
                                                         horizontalAlignment: Text.AlignHCenter

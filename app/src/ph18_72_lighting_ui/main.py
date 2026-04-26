@@ -75,6 +75,7 @@ class LightingUiModel(QObject):
     backendReadyChanged = Signal()
     selectedPanelChanged = Signal()
     backendModeChanged = Signal()
+    coverLogoStateChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -89,6 +90,11 @@ class LightingUiModel(QObject):
             "d": (0, 0, 0),
         }
         self._cover_logo_segment = "all"
+        self._cover_logo_state: dict[str, tuple[int, int, int]] = {
+            "left": (24, 32, 40),
+            "middle": (24, 32, 40),
+            "right": (24, 32, 40),
+        }
 
     def _detect_backend_mode(self) -> str:
         forced = os.environ.get("PH18_UI_BACKEND", "").strip().lower()
@@ -124,6 +130,10 @@ class LightingUiModel(QObject):
     @Property(QObject, constant=True)
     def history(self) -> QObject:
         return self._history
+
+    @Property(int, notify=coverLogoStateChanged)
+    def coverLogoStateVersion(self) -> int:
+        return sum(sum(color) for color in self._cover_logo_state.values())
 
     def _mock_output(self, title: str, args: list[str]) -> str:
         command_name = args[0]
@@ -251,7 +261,7 @@ class LightingUiModel(QObject):
             lines.append("note=no mock output available")
         return "\n".join(lines)
 
-    def _run_daemon_command(self, title: str, args: list[str]) -> None:
+    def _run_daemon_command(self, title: str, args: list[str]) -> bool:
         command = [str(DAEMON_BIN), *args] if DAEMON_BIN.exists() else ["cargo", "run", "--quiet", "--", *args]
         pretty = " ".join(command)
         if self._backend_mode == "mock":
@@ -259,7 +269,7 @@ class LightingUiModel(QObject):
             self._history.prepend(CommandRecord(title=title, command=f"mock {' '.join(args)}", output=output, ok=True))
             self._status = "Mock backend command recorded"
             self.statusChanged.emit()
-            return
+            return True
 
         completed = subprocess.run(
             command,
@@ -279,6 +289,7 @@ class LightingUiModel(QObject):
         self._history.prepend(CommandRecord(title=title, command=pretty, output=output, ok=ok))
         self._status = "Last command succeeded" if ok else "Last command failed"
         self.statusChanged.emit()
+        return ok
 
     @Slot()
     def runInventory(self) -> None:
@@ -375,10 +386,7 @@ class LightingUiModel(QObject):
 
     @Slot()
     def setCoverLogoBlue(self) -> None:
-        self._run_daemon_command(
-            "Cover Logo Blue",
-            ["set-cover-logo", "--red", "0", "--green", "0", "--blue", "255"],
-        )
+        self.setCoverLogoColor("all", 0, 0, 255)
 
     @Slot(str, int, int, int)
     def setCoverLogoColor(self, segment: str, red: int, green: int, blue: int) -> None:
@@ -393,7 +401,20 @@ class LightingUiModel(QObject):
         ]
         if segment != "all":
             args.extend(["--segment", segment])
-        self._run_daemon_command(f"Cover Logo {segment}", args)
+        ok = self._run_daemon_command(f"Cover Logo {segment}", args)
+        if not ok:
+            return
+        color = (
+            max(0, min(255, red)),
+            max(0, min(255, green)),
+            max(0, min(255, blue)),
+        )
+        if segment == "all":
+            for zone in self._cover_logo_state:
+                self._cover_logo_state[zone] = color
+        else:
+            self._cover_logo_state[segment] = color
+        self.coverLogoStateChanged.emit()
 
     @Slot(int)
     def setCoverLogoBrightness(self, level: int) -> None:
@@ -401,6 +422,27 @@ class LightingUiModel(QObject):
             "Cover Logo Brightness",
             ["set-cover-logo-brightness", "--level", str(max(0, min(100, level)))],
         )
+
+    @Slot(str, result=str)
+    def coverLogoButtonColor(self, segment: str) -> str:
+        if segment == "all":
+            colors = list(self._cover_logo_state.values())
+            if all(color == colors[0] for color in colors[1:]):
+                return rgb_to_hex(colors[0])
+            return "#2f3943"
+        return rgb_to_hex(self._cover_logo_state.get(segment, (24, 32, 40)))
+
+    @Slot(str, result=str)
+    def coverLogoButtonTextColor(self, segment: str) -> str:
+        if segment == "all":
+            colors = list(self._cover_logo_state.values())
+            if not all(color == colors[0] for color in colors[1:]):
+                return "#eef2f7"
+            color = colors[0]
+        else:
+            color = self._cover_logo_state.get(segment, (24, 32, 40))
+        brightness = (color[0] * 299 + color[1] * 587 + color[2] * 114) / 1000
+        return "#10151a" if brightness > 140 else "#eef2f7"
 
     @Slot()
     def noteUnimplemented(self) -> None:
@@ -424,6 +466,10 @@ def canonicalize_magkey_rgb(red: int, green: int, blue: int) -> tuple[int, int, 
     if blue >= green:
         return (0, 0, 255)
     return (0, 255, 0)
+
+
+def rgb_to_hex(color: tuple[int, int, int]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*color)
 
 
 def main() -> int:
