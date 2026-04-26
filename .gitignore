@@ -1,0 +1,24 @@
+.pytest_cache/
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# Local reverse-engineering captures, imported repos, scratch logs, and hardware test output.
+testing/
+
+# Python dev artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# Rust daemon artifacts
+target/
+
+# Runtime state/logs
+*.log
+*.pid
+*.socket

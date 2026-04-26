@@ -1,0 +1,9 @@
+[package]
+name = "ph18-lighting-daemon"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Hardware daemon for Acer PH18-72 lighting control"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
