@@ -7,3 +7,4 @@ description = "Hardware daemon for Acer PH18-72 lighting control"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+libc = "0.2"

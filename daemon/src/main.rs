@@ -1,4 +1,35 @@
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::os::fd::AsRawFd;
+use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
+
 use clap::{Parser, Subcommand};
+
+const TARGET_HID_ID: &str = "0003:000005AF:0000866A";
+const DARFON_HID_ID: &str = "0003:00000D62:0000BA51";
+const REPORT_DESCRIPTOR_PREFIX: [u8; 3] = [0x06, 0x02, 0xff];
+const PKT_PRELUDE: [[u8; 8]; 6] = [
+    [0xb1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4e],
+    [0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf5],
+    [0x08, 0x02, 0x4f, 0x0a, 0x32, 0x00, 0x00, 0x6a],
+    [0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0xea],
+    [0x13, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0xe4],
+    [0x08, 0x02, 0x4f, 0x05, 0x32, 0x08, 0x01, 0x66],
+];
+const PKT_PRE_A: [u8; 8] = [0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x77];
+const PKT_PRE_B: [u8; 8] = [0x12, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0xe5];
+const PKT_COMMIT33: [u8; 8] = [0x08, 0x02, 0x33, 0x05, 0x32, 0x08, 0x01, 0x82];
+const KEYBOARD_BLUE_WORD: [u8; 4] = [0xff, 0x00, 0x00, 0xff];
+const KEYBOARD_REDISH_WORD: [u8; 4] = [0x00, 0x00, 0xff, 0x00];
+const KEYBOARD_GREEN_EXPERIMENT_WORD: [u8; 4] = [0x00, 0x00, 0x00, 0xff];
+const MAGKEY_COMMIT_PACKET: [u8; 8] = [0x08, 0x02, 0x4f, 0x05, 0x32, 0x08, 0x01, 0x66];
+const MAGKEY_KEYS: [&str; 4] = ["w", "a", "s", "d"];
+const KEYBOARD_STUBBORN_INDICES: [u16; 4] = [25, 66, 71, 98];
+const REPORT84_REPEAT: usize = 12;
+const DARFON_OUTPUT_PAYLOAD_LEN: usize = 64;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Acer PH18-72 lighting control daemon")]
@@ -11,18 +42,839 @@ struct Args {
 enum Command {
     /// Print detected backend capabilities without changing hardware.
     Inventory,
+    /// Emit the known-good full blue flow label.
+    RestoreKnownGood,
+    /// Set the main keyboard to the confirmed blue word/path.
+    SetMainKeyboardBlue,
+    /// Set the main keyboard to the observed red-ish test word/path.
+    SetMainKeyboardRed,
+    /// Set the main keyboard to the experimental green test word/path.
+    SetMainKeyboardGreen,
+    /// Set one logical keyboard key through the report84/report86 path.
+    SetKeyboardKey {
+        #[arg(long)]
+        key: String,
+        #[arg(long)]
+        red: u8,
+        #[arg(long)]
+        green: u8,
+        #[arg(long)]
+        blue: u8,
+    },
+    /// Set MagKeys using a confirmed safe command shape.
+    SetMagkeys {
+        #[arg(long)]
+        all: Option<String>,
+    },
+    /// Set all four MagKeys with explicit per-key colors.
+    SetMagkeysPattern {
+        #[arg(long)]
+        w: String,
+        #[arg(long)]
+        a: String,
+        #[arg(long)]
+        s: String,
+        #[arg(long)]
+        d: String,
+    },
+    /// Set one MagKey through the ff02 LED-map path.
+    SetMagkeyKey {
+        #[arg(long)]
+        key: String,
+        #[arg(long)]
+        red: u8,
+        #[arg(long)]
+        green: u8,
+        #[arg(long)]
+        blue: u8,
+    },
+    /// Set the Darfon cover logo as a whole or one segment at a time.
+    SetCoverLogo {
+        #[arg(long)]
+        segment: Option<String>,
+        #[arg(long)]
+        red: u8,
+        #[arg(long)]
+        green: u8,
+        #[arg(long)]
+        blue: u8,
+        #[arg(long, default_value_t = false)]
+        no_force_brightness: bool,
+    },
 }
 
 fn main() {
     let args = Args::parse();
-    match args.command {
+    let result = match args.command {
         Command::Inventory => inventory(),
+        Command::RestoreKnownGood => restore_known_good(),
+        Command::SetMainKeyboardBlue => set_main_keyboard_blue(),
+        Command::SetMainKeyboardRed => set_main_keyboard_red(),
+        Command::SetMainKeyboardGreen => set_main_keyboard_green(),
+        Command::SetKeyboardKey {
+            key,
+            red,
+            green,
+            blue,
+        } => set_keyboard_key(&key, (red, green, blue)),
+        Command::SetMagkeys { all } => set_magkeys(all),
+        Command::SetMagkeysPattern { w, a, s, d } => set_magkeys_pattern(&w, &a, &s, &d),
+        Command::SetMagkeyKey {
+            key,
+            red,
+            green,
+            blue,
+        } => set_magkey_key(&key, (red, green, blue)),
+        Command::SetCoverLogo {
+            segment,
+            red,
+            green,
+            blue,
+            no_force_brightness,
+        } => set_cover_logo(segment.as_deref(), (red, green, blue), !no_force_brightness),
+    };
+
+    if let Err(err) = result {
+        eprintln!("error={err}");
+        std::process::exit(1);
     }
 }
 
-fn inventory() {
+fn inventory() -> io::Result<()> {
     println!("ph18-lighting-daemon inventory");
     println!("hid.jingmold=05af:866a");
     println!("hid.darfon=0d62:ba51");
     println!("wmi=todo-read-only-triage");
+    println!("surface.main_keyboard=functional");
+    println!("surface.magkeys=functional");
+    println!("surface.cover_logo=functional");
+    println!("surface.base_logo=in-development");
+    println!("surface.infinity_mirror=in-development");
+    Ok(())
+}
+
+fn restore_known_good() -> io::Result<()> {
+    println!("action=restore-known-good");
+    println!("controller=05af:866a");
+    println!("controller=0d62:ba51");
+    println!("note=confirmed hybrid full-blue restore flow placeholder");
+    Ok(())
+}
+
+fn set_main_keyboard_blue() -> io::Result<()> {
+    set_main_keyboard_word(
+        "set-main-keyboard-blue",
+        KEYBOARD_BLUE_WORD,
+        (0, 0, 255),
+        "confirmed visible main keyboard blue path",
+    )
+}
+
+fn set_main_keyboard_red() -> io::Result<()> {
+    set_main_keyboard_word(
+        "set-main-keyboard-red",
+        KEYBOARD_REDISH_WORD,
+        (255, 0, 0),
+        "experimental commit33 word that previously looked red on this unit",
+    )
+}
+
+fn set_main_keyboard_green() -> io::Result<()> {
+    set_main_keyboard_word(
+        "set-main-keyboard-green",
+        KEYBOARD_GREEN_EXPERIMENT_WORD,
+        (0, 255, 0),
+        "experimental commit33 word that may map green or another visible state",
+    )
+}
+
+fn set_main_keyboard_word(
+    action: &str,
+    word: [u8; 4],
+    correction_rgb: (u8, u8, u8),
+    note: &str,
+) -> io::Result<()> {
+    let node = find_ff02_node()?;
+    let frame = keyboard_frame(word);
+
+    println!("action={action}");
+    println!("controller=05af:866a");
+    println!("path=ff02_commit33");
+    println!("word={}", hex_string(&word));
+    println!("hidraw={}", node.display());
+    println!("passes=20");
+    println!("banks=8");
+    println!("note={note}");
+
+    for packet in PKT_PRELUDE {
+        send_feature_ff02(&node, &packet)?;
+    }
+
+    for _ in 0..20 {
+        send_feature_ff02(&node, &PKT_PRE_A)?;
+        send_feature_ff02(&node, &PKT_PRE_B)?;
+        for _ in 0..8 {
+            send_out64(&node, &frame)?;
+        }
+        send_feature_ff02(&node, &PKT_COMMIT33)?;
+    }
+
+    patch_stubborn_keyboard_keys(correction_rgb)?;
+
+    println!(
+        "stubborn_indices={}",
+        KEYBOARD_STUBBORN_INDICES
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    println!("result=sent");
+    Ok(())
+}
+
+fn patch_stubborn_keyboard_keys(color: (u8, u8, u8)) -> io::Result<()> {
+    let node = find_vendor_keyboard_node()?;
+    let report82 = build_report82_color(color.0, color.1, color.2, 0xff, 1);
+
+    send_feature_report(&node, &report82)?;
+    send_feature_report(&node, &[0x86, 0x01])?;
+
+    for index in KEYBOARD_STUBBORN_INDICES {
+        let report84 = build_report84_single_index(index, color.0, color.1, color.2, 1, 8);
+        for _ in 0..REPORT84_REPEAT {
+            send_feature_report(&node, &report84)?;
+            send_feature_report(&node, &[0x86, 0x00])?;
+            thread::sleep(Duration::from_millis(10));
+            send_feature_report(&node, &[0x86, 0x01])?;
+        }
+    }
+
+    Ok(())
+}
+
+fn set_keyboard_key(key: &str, color: (u8, u8, u8)) -> io::Result<()> {
+    let index = keyboard_key_index(key).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown keyboard key {key}"),
+        )
+    })?;
+    let node = find_vendor_keyboard_node()?;
+    let report84 = build_report84_single_index(index, color.0, color.1, color.2, 1, 8);
+
+    println!("action=set-keyboard-key");
+    println!("controller=05af:866a");
+    println!("path=report84_report86");
+    println!("key={}", normalize_name(key));
+    println!("index={index}");
+    println!("rgb={},{},{}", color.0, color.1, color.2);
+    println!("hidraw={}", node.display());
+    println!("note=experimental per-key keyboard path");
+
+    for _ in 0..REPORT84_REPEAT {
+        send_feature_report(&node, &report84)?;
+        send_feature_report(&node, &[0x86, 0x00])?;
+        thread::sleep(Duration::from_millis(10));
+        send_feature_report(&node, &[0x86, 0x01])?;
+    }
+
+    println!("report84={}", hex_string(&report84));
+    println!("report86=8601");
+    println!("result=sent");
+    Ok(())
+}
+
+fn set_magkeys(all: Option<String>) -> io::Result<()> {
+    let color = parse_rgb_csv(all.as_deref().unwrap_or("0,0,255"))?;
+    let entries = MAGKEY_KEYS.map(|key| (key, color));
+    let (node, payload) = apply_magkey_entries(&entries)?;
+
+    println!("action=set-magkeys");
+    println!("controller=05af:866a");
+    println!("path=ff02_ledmap_commit");
+    println!("hidraw={}", node.display());
+    println!("rgb={},{},{}", color.0, color.1, color.2);
+    println!("commit={}", hex_string(&MAGKEY_COMMIT_PACKET));
+    println!("payload={}", hex_string(&payload));
+    println!("result=sent");
+    Ok(())
+}
+
+fn set_magkeys_pattern(w: &str, a: &str, s: &str, d: &str) -> io::Result<()> {
+    let entries = [
+        ("w", parse_rgb_csv(w)?),
+        ("a", parse_rgb_csv(a)?),
+        ("s", parse_rgb_csv(s)?),
+        ("d", parse_rgb_csv(d)?),
+    ];
+    let (node, payload) = apply_magkey_entries(&entries)?;
+
+    println!("action=set-magkeys-pattern");
+    println!("controller=05af:866a");
+    println!("path=ff02_ledmap_commit");
+    println!("hidraw={}", node.display());
+    println!(
+        "w={},{},{}",
+        entries[0].1 .0, entries[0].1 .1, entries[0].1 .2
+    );
+    println!(
+        "a={},{},{}",
+        entries[1].1 .0, entries[1].1 .1, entries[1].1 .2
+    );
+    println!(
+        "s={},{},{}",
+        entries[2].1 .0, entries[2].1 .1, entries[2].1 .2
+    );
+    println!(
+        "d={},{},{}",
+        entries[3].1 .0, entries[3].1 .1, entries[3].1 .2
+    );
+    println!("commit={}", hex_string(&MAGKEY_COMMIT_PACKET));
+    println!("payload={}", hex_string(&payload));
+    println!("result=sent");
+    Ok(())
+}
+
+fn set_magkey_key(key: &str, color: (u8, u8, u8)) -> io::Result<()> {
+    let normalized = normalize_name(key);
+    if !MAGKEY_KEYS.contains(&normalized.as_str()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown magkey {key}"),
+        ));
+    }
+
+    let entries = [(normalized.as_str(), color)];
+    let (node, payload) = apply_magkey_entries(&entries)?;
+
+    println!("action=set-magkey-key");
+    println!("controller=05af:866a");
+    println!("path=ff02_ledmap_commit");
+    println!("hidraw={}", node.display());
+    println!("key={normalized}");
+    println!("rgb={},{},{}", color.0, color.1, color.2);
+    println!("commit={}", hex_string(&MAGKEY_COMMIT_PACKET));
+    println!("payload={}", hex_string(&payload));
+    println!("result=sent");
+    Ok(())
+}
+
+fn apply_magkey_entries(entries: &[(&str, (u8, u8, u8))]) -> io::Result<(PathBuf, [u8; 64])> {
+    let node = find_ff02_node()?;
+    let payload = build_magkey_payload(entries);
+
+    for packet in PKT_PRELUDE {
+        send_feature_ff02(&node, &packet)?;
+    }
+
+    send_out64(&node, &payload)?;
+    send_feature_ff02(&node, &MAGKEY_COMMIT_PACKET)?;
+    Ok((node, payload))
+}
+
+fn set_cover_logo(segment: Option<&str>, color: (u8, u8, u8), force_brightness: bool) -> io::Result<()> {
+    let node = find_darfon_node()?;
+    let mut results: Vec<(String, String)> = Vec::new();
+
+    println!("action=set-cover-logo");
+    println!("controller=0d62:ba51");
+    println!("path=darfon_short_packets");
+    println!("hidraw={}", node.display());
+    println!("rgb={},{},{}", color.0, color.1, color.2);
+    println!("force_brightness={}", if force_brightness { "true" } else { "false" });
+
+    if force_brightness {
+        let payload = darfon_brightness_packet(100);
+        println!("brightness_packet={}", hex_string(&payload));
+        results.extend(attempt_darfon_transports(&node, &payload));
+    }
+
+    match segment {
+        Some(name) => {
+            let segment_id = darfon_segment_id(name)?;
+            let payload = darfon_color_packet(segment_id, color.0, color.1, color.2);
+            println!("segment={}", normalize_name(name));
+            println!("color_packet={}", hex_string(&payload));
+            results.extend(attempt_darfon_transports(&node, &payload));
+        }
+        None => {
+            println!("segment=all");
+            for segment_id in 1..=3 {
+                let payload = darfon_color_packet(segment_id, color.0, color.1, color.2);
+                println!("color_packet={}", hex_string(&payload));
+                results.extend(attempt_darfon_transports(&node, &payload));
+            }
+        }
+    }
+
+    for (method, outcome) in results {
+        println!("{method}={outcome}");
+    }
+    println!("result=sent");
+    Ok(())
+}
+
+fn find_ff02_node() -> io::Result<PathBuf> {
+    for entry in fs::read_dir("/sys/class/hidraw")? {
+        let entry = entry?;
+        let hidraw_name = entry.file_name();
+        let Some(name) = hidraw_name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("hidraw") {
+            continue;
+        }
+
+        let device_dir = entry.path().join("device");
+        let uevent_path = device_dir.join("uevent");
+        if !uevent_path.exists() {
+            continue;
+        }
+
+        let fields = parse_key_value_file(&uevent_path)?;
+        if fields.get("HID_ID").map(String::as_str) != Some(TARGET_HID_ID) {
+            continue;
+        }
+
+        let descriptor = fs::read(device_dir.join("report_descriptor"))?;
+        if descriptor.starts_with(&REPORT_DESCRIPTOR_PREFIX) {
+            return Ok(Path::new("/dev").join(name));
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "ff02 hidraw node not found for 05af:866a",
+    ))
+}
+
+fn find_vendor_keyboard_node() -> io::Result<PathBuf> {
+    for entry in fs::read_dir("/sys/class/hidraw")? {
+        let entry = entry?;
+        let hidraw_name = entry.file_name();
+        let Some(name) = hidraw_name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("hidraw") {
+            continue;
+        }
+
+        let device_dir = entry.path().join("device");
+        let uevent_path = device_dir.join("uevent");
+        if !uevent_path.exists() {
+            continue;
+        }
+
+        let fields = parse_key_value_file(&uevent_path)?;
+        if fields.get("HID_ID").map(String::as_str) != Some(TARGET_HID_ID) {
+            continue;
+        }
+
+        let descriptor = fs::read(device_dir.join("report_descriptor"))?;
+        if descriptor.windows(2).any(|window| window == [0x85, 0x82])
+            && descriptor.windows(2).any(|window| window == [0x85, 0x83])
+        {
+            return Ok(Path::new("/dev").join(name));
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "vendor keyboard HID node not found for report84/report86",
+    ))
+}
+
+fn find_darfon_node() -> io::Result<PathBuf> {
+    for entry in fs::read_dir("/sys/class/hidraw")? {
+        let entry = entry?;
+        let hidraw_name = entry.file_name();
+        let Some(name) = hidraw_name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("hidraw") {
+            continue;
+        }
+
+        let device_dir = entry.path().join("device");
+        let uevent_path = device_dir.join("uevent");
+        if !uevent_path.exists() {
+            continue;
+        }
+
+        let fields = parse_key_value_file(&uevent_path)?;
+        if fields.get("HID_ID").map(String::as_str) != Some(DARFON_HID_ID) {
+            continue;
+        }
+
+        let descriptor = fs::read(device_dir.join("report_descriptor"))?;
+        let has_feature_8 = descriptor.windows(4).any(|window| window == [0x95, 0x08, 0xb1, 0x02]);
+        let has_output_64 = descriptor.windows(4).any(|window| window == [0x75, 0x08, 0x95, 0x40])
+            && descriptor.windows(4).any(|window| window == [0x09, 0x21, 0x91, 0x02]);
+        if has_feature_8 && has_output_64 {
+            return Ok(Path::new("/dev").join(name));
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "Darfon cover-logo HID node not found for 0d62:ba51",
+    ))
+}
+
+fn parse_key_value_file(path: &Path) -> io::Result<HashMap<String, String>> {
+    let mut fields = HashMap::new();
+    let contents = fs::read_to_string(path)?;
+    for line in contents.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            fields.insert(key.to_owned(), value.to_owned());
+        }
+    }
+    Ok(fields)
+}
+
+fn keyboard_frame(word: [u8; 4]) -> [u8; 64] {
+    let mut frame = [0_u8; 64];
+    for chunk in frame.chunks_exact_mut(4) {
+        chunk.copy_from_slice(&word);
+    }
+    frame
+}
+
+fn build_magkey_payload(entries: &[(&str, (u8, u8, u8))]) -> [u8; 64] {
+    let mut payload = [0_u8; 64];
+
+    for (key, color) in entries {
+        let word = magkey_word(*color);
+        let start = magkey_slot(key) * 4;
+        for offset in [0_usize, 4, 8] {
+            payload[start + offset..start + offset + 4].copy_from_slice(&word);
+        }
+    }
+
+    payload
+}
+
+fn magkey_word(color: (u8, u8, u8)) -> [u8; 4] {
+    let (red, green, blue) = color;
+    let byte0 = if blue > 0 { 0xff } else { 0x00 };
+    let byte3 = if blue > 0 { blue } else { green };
+    [byte0, 0x00, red, byte3]
+}
+
+fn magkey_slot(key: &str) -> usize {
+    match key {
+        "w" => 0,
+        "a" => 3,
+        "s" => 6,
+        "d" => 9,
+        _ => unreachable!("unexpected magkey"),
+    }
+}
+
+fn build_report84_single_index(
+    index: u16,
+    red: u8,
+    green: u8,
+    blue: u8,
+    mode_selector: u8,
+    brightness_level: u8,
+) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(51);
+    payload.extend_from_slice(&[0x84, mode_selector, brightness_level.min(8)]);
+    for _ in 0..8 {
+        payload.extend_from_slice(&index.to_le_bytes());
+    }
+    for _ in 0..8 {
+        payload.extend_from_slice(&[red, green, blue, 0x00]);
+    }
+    payload
+}
+
+fn build_report82_color(red: u8, green: u8, blue: u8, alpha: u8, mode_index: u8) -> Vec<u8> {
+    let counter = u16::from(mode_index) * 16710 + 9415;
+    let mut body = vec![0_u8; 28];
+    body[0] = mode_index;
+    body[2] = (counter & 0xff) as u8;
+    body[3] = (counter >> 8) as u8;
+    body[6] = 0x1e;
+    body[7] = 0x14;
+    body[14] = 0x88;
+    body[15] = 0x13;
+    body[18] = 0x01;
+    body[22] = red;
+    body[23] = green;
+    body[24] = blue;
+    body[25] = alpha;
+    body[26] = 0x01;
+    body[27] = 0x39u8.saturating_add(mode_index);
+
+    let mut payload = Vec::with_capacity(29);
+    payload.push(0x82);
+    payload.extend_from_slice(&body);
+    payload
+}
+
+fn darfon_segment_id(name: &str) -> io::Result<u8> {
+    match normalize_name(name).as_str() {
+        "left" => Ok(1),
+        "middle" => Ok(2),
+        "right" => Ok(3),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown Darfon segment {other}"),
+        )),
+    }
+}
+
+fn darfon_color_packet(segment: u8, red: u8, green: u8, blue: u8) -> [u8; 8] {
+    let tail = 0xe8u8.saturating_sub(segment);
+    [0x14, 0x01, segment, red, green, blue, 0x03, tail]
+}
+
+fn darfon_brightness_packet(level: u8) -> [u8; 8] {
+    let level = level.min(100);
+    let tail = (0xefi32 - (((level as i32) * 25) / 4)) as u8;
+    [0x08, 0x01, 0x01, 0x05, level, 0x01, 0x00, tail]
+}
+
+fn attempt_darfon_transports(node: &Path, payload: &[u8]) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    let methods: [(&str, fn(&Path, &[u8]) -> io::Result<()>); 4] = [
+        ("feature_prefixed", darfon_feature_prefixed),
+        ("feature_raw", darfon_feature_raw),
+        ("output_prefixed", darfon_output_prefixed),
+        ("output_raw", darfon_output_raw),
+    ];
+
+    for (name, func) in methods {
+        let outcome = match func(node, payload) {
+            Ok(()) => "ok".to_string(),
+            Err(err) => err.to_string(),
+        };
+        results.push((name.to_string(), outcome));
+    }
+
+    results
+}
+
+fn send_feature_ff02(node: &Path, payload: &[u8]) -> io::Result<()> {
+    let mut buffer = Vec::with_capacity(payload.len() + 1);
+    buffer.push(0x00);
+    buffer.extend_from_slice(payload);
+    ioctl_feature(node, &mut buffer)
+}
+
+fn darfon_feature_prefixed(node: &Path, payload: &[u8]) -> io::Result<()> {
+    let mut buffer = Vec::with_capacity(payload.len() + 1);
+    buffer.push(0x00);
+    buffer.extend_from_slice(payload);
+    ioctl_feature(node, &mut buffer)
+}
+
+fn darfon_feature_raw(node: &Path, payload: &[u8]) -> io::Result<()> {
+    let mut buffer = payload.to_vec();
+    ioctl_feature(node, &mut buffer)
+}
+
+fn darfon_output_prefixed(node: &Path, payload: &[u8]) -> io::Result<()> {
+    let mut packet = Vec::with_capacity(DARFON_OUTPUT_PAYLOAD_LEN + 1);
+    packet.push(0x00);
+    packet.extend_from_slice(payload);
+    packet.resize(DARFON_OUTPUT_PAYLOAD_LEN + 1, 0x00);
+    send_raw_output(node, &packet)
+}
+
+fn darfon_output_raw(node: &Path, payload: &[u8]) -> io::Result<()> {
+    let mut packet = payload.to_vec();
+    packet.resize(DARFON_OUTPUT_PAYLOAD_LEN, 0x00);
+    send_raw_output(node, &packet)
+}
+
+fn send_feature_report(node: &Path, payload: &[u8]) -> io::Result<()> {
+    let mut buffer = payload.to_vec();
+    ioctl_feature(node, &mut buffer)
+}
+
+fn ioctl_feature(node: &Path, buffer: &mut [u8]) -> io::Result<()> {
+    let file = OpenOptions::new().read(true).write(true).open(node)?;
+    let result = unsafe { libc::ioctl(file.as_raw_fd(), hidiocsfeature(buffer.len()), buffer.as_mut_ptr()) };
+    if result < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn send_out64(node: &Path, payload: &[u8]) -> io::Result<()> {
+    send_raw_output(node, payload)
+}
+
+fn send_raw_output(node: &Path, payload: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).open(node)?;
+    file.write_all(payload)?;
+    file.flush()?;
+    Ok(())
+}
+
+fn parse_rgb_csv(value: &str) -> io::Result<(u8, u8, u8)> {
+    let parts: Vec<&str> = value.split(',').collect();
+    if parts.len() != 3 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("expected R,G,B, got {value}"),
+        ));
+    }
+
+    Ok((
+        parse_rgb_component(parts[0], value)?,
+        parse_rgb_component(parts[1], value)?,
+        parse_rgb_component(parts[2], value)?,
+    ))
+}
+
+fn parse_rgb_component(component: &str, original: &str) -> io::Result<u8> {
+    component.trim().parse::<u8>().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid RGB component in {original}"),
+        )
+    })
+}
+
+fn keyboard_key_index(name: &str) -> Option<u16> {
+    match normalize_name(name).as_str() {
+        "esc" => Some(0),
+        "f1" => Some(1),
+        "f2" => Some(2),
+        "f3" => Some(3),
+        "f4" => Some(4),
+        "f5" => Some(5),
+        "f6" => Some(6),
+        "f7" => Some(7),
+        "f8" => Some(8),
+        "f9" => Some(9),
+        "f10" => Some(10),
+        "f11" => Some(11),
+        "f12" => Some(12),
+        "print_screen" | "prtsc" | "prt_sc" => Some(13),
+        "insert" | "ins" => Some(14),
+        "delete" | "del" => Some(15),
+        "media_prev" | "prev_track" => Some(16),
+        "media_play_pause" | "play_pause" | "pause_play" => Some(17),
+        "media_next" | "next_track" => Some(18),
+        "power" => Some(19),
+        "grave" | "backtick" | "tilde" => Some(20),
+        "1" | "digit_1" => Some(21),
+        "2" | "digit_2" => Some(22),
+        "3" | "digit_3" => Some(23),
+        "4" | "digit_4" => Some(24),
+        "5" | "digit_5" => Some(25),
+        "6" | "digit_6" => Some(26),
+        "7" | "digit_7" => Some(27),
+        "8" | "digit_8" => Some(28),
+        "9" | "digit_9" => Some(29),
+        "0" | "digit_0" => Some(30),
+        "minus" => Some(31),
+        "equal" | "equals" => Some(32),
+        "backspace" => Some(33),
+        "predator_sense" => Some(34),
+        "keypad_num_lock" | "num_lock" => Some(35),
+        "keypad_divide" | "kp_divide" => Some(36),
+        "keypad_multiply" | "kp_multiply" => Some(37),
+        "tab" => Some(38),
+        "q" => Some(39),
+        "e" => Some(41),
+        "r" => Some(42),
+        "t" => Some(43),
+        "y" => Some(44),
+        "u" => Some(45),
+        "i" => Some(46),
+        "o" => Some(47),
+        "p" => Some(48),
+        "left_bracket" | "lbracket" => Some(49),
+        "right_bracket" | "rbracket" => Some(50),
+        "backslash" => Some(51),
+        "keypad_7" => Some(52),
+        "keypad_8" => Some(53),
+        "keypad_9" => Some(54),
+        "keypad_minus" | "kp_minus" => Some(55),
+        "caps_lock" => Some(56),
+        "f" => Some(60),
+        "g" => Some(61),
+        "h" => Some(62),
+        "j" => Some(63),
+        "k" => Some(64),
+        "l" => Some(65),
+        "semicolon" => Some(66),
+        "apostrophe" | "quote" => Some(67),
+        "enter" => Some(68),
+        "keypad_4" => Some(69),
+        "keypad_5" => Some(70),
+        "keypad_6" => Some(71),
+        "keypad_plus" | "kp_plus" => Some(72),
+        "left_shift" | "lshift" => Some(73),
+        "z" => Some(74),
+        "x" => Some(75),
+        "c" => Some(76),
+        "v" => Some(77),
+        "b" => Some(78),
+        "n" => Some(79),
+        "m" => Some(80),
+        "comma" => Some(81),
+        "period" => Some(82),
+        "slash" => Some(83),
+        "right_shift" | "rshift" => Some(84),
+        "arrow_up" | "up" => Some(85),
+        "keypad_1" => Some(86),
+        "keypad_2" => Some(87),
+        "keypad_3" => Some(88),
+        "left_ctrl" | "lctrl" => Some(89),
+        "fn" => Some(90),
+        "left_windows" | "lwin" | "win" | "windows" => Some(91),
+        "left_alt" => Some(92),
+        "space" => Some(93),
+        "right_alt" | "altgr" => Some(94),
+        "menu" => Some(95),
+        "copilot" => Some(96),
+        "arrow_left" | "left" => Some(97),
+        "arrow_down" | "down" => Some(98),
+        "arrow_right" | "right" => Some(99),
+        "keypad_0" => Some(100),
+        "keypad_decimal" | "kp_decimal" => Some(101),
+        "keypad_enter" | "kp_enter" => Some(102),
+        _ => None,
+    }
+}
+
+fn normalize_name(name: &str) -> String {
+    name.trim()
+        .to_lowercase()
+        .replace('-', "_")
+        .replace(' ', "_")
+}
+
+fn hidiocsfeature(length: usize) -> libc::c_ulong {
+    const IOC_NRBITS: u32 = 8;
+    const IOC_TYPEBITS: u32 = 8;
+    const IOC_SIZEBITS: u32 = 14;
+    const IOC_NRSHIFT: u32 = 0;
+    const IOC_TYPESHIFT: u32 = IOC_NRSHIFT + IOC_NRBITS;
+    const IOC_SIZESHIFT: u32 = IOC_TYPESHIFT + IOC_TYPEBITS;
+    const IOC_DIRSHIFT: u32 = IOC_SIZESHIFT + IOC_SIZEBITS;
+    const IOC_READ: u32 = 2;
+    const IOC_WRITE: u32 = 1;
+
+    (((IOC_READ | IOC_WRITE) << IOC_DIRSHIFT)
+        | ((b'H' as u32) << IOC_TYPESHIFT)
+        | (0x06_u32 << IOC_NRSHIFT)
+        | ((length as u32) << IOC_SIZESHIFT)) as libc::c_ulong
+}
+
+fn hex_string(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
 }
