@@ -25,7 +25,7 @@ ApplicationWindow {
     readonly property var panels: [
         { name: "Main Keyboard", status: "Experimental", color: "#c27803" },
         { name: "MagKey 3.0", status: "Experimental", color: "#c27803" },
-        { name: "Cover Logo", status: "Experimental", color: "#c27803" },
+        { name: "Cover Logo", status: "Functional", color: "#1f9d55" },
         { name: "Base Logo", status: "In Development", color: "#c27803" },
         { name: "Infinity Mirror", status: "In Development", color: "#c27803" }
     ]
@@ -750,12 +750,6 @@ ApplicationWindow {
                                 }
                             }
 
-                            Label {
-                                text: "Treat the cover logo as a 3-zone experimental surface until we re-verify left, middle, and right behavior cleanly."
-                                color: "#d9b86c"
-                                font.pixelSize: 13
-                                wrapMode: Text.Wrap
-                            }
                         }
                     }
 
@@ -791,58 +785,24 @@ ApplicationWindow {
                     font.bold: true
                 }
 
-                ListView {
+                ScrollView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    model: lightingUiModel.history
-                    spacing: 10
                     clip: true
 
-                    delegate: Rectangle {
-                        required property string title
-                        required property string command
-                        required property string output
-                        required property bool ok
-
-                        width: ListView.view.width
-                        radius: 8
-                        color: ok ? "#11181c" : "#221619"
-                        border.color: ok ? "#2f424d" : "#744247"
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 6
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Label {
-                                    text: title
-                                    color: "#eef2f7"
-                                    font.pixelSize: 15
-                                    font.bold: true
-                                    Layout.fillWidth: true
-                                }
-                                Rectangle {
-                                    width: 10
-                                    height: 10
-                                    radius: 5
-                                    color: ok ? "#1f9d55" : "#c24141"
-                                }
-                            }
-
-                            Text {
-                                text: command
-                                color: "#9fb0c0"
-                                font.family: "monospace"
-                                wrapMode: Text.WrapAnywhere
-                            }
-
-                            Text {
-                                text: output
-                                color: "#d1d7de"
-                                wrapMode: Text.Wrap
-                            }
+                    TextArea {
+                        readOnly: true
+                        text: lightingUiModel.historyLog
+                        wrapMode: TextEdit.Wrap
+                        color: "#d1d7de"
+                        font.family: "monospace"
+                        selectionColor: "#31404e"
+                        selectedTextColor: "#eef2f7"
+                        placeholderText: "Run a command to see the command line, packet preview, and backend output here."
+                        background: Rectangle {
+                            radius: 8
+                            color: "#11181c"
+                            border.color: "#2f424d"
                         }
                     }
                 }

@@ -23,6 +23,7 @@ SAFE_KEYBOARD_PATCH_KEYS = {"5", "semicolon", "keypad_6", "arrow_down"}
 class CommandRecord:
     title: str
     command: str
+    packets: str
     output: str
     ok: bool
 
@@ -30,8 +31,9 @@ class CommandRecord:
 class HistoryModel(QAbstractListModel):
     TitleRole = Qt.UserRole + 1
     CommandRole = Qt.UserRole + 2
-    OutputRole = Qt.UserRole + 3
-    OkRole = Qt.UserRole + 4
+    PacketsRole = Qt.UserRole + 3
+    OutputRole = Qt.UserRole + 4
+    OkRole = Qt.UserRole + 5
 
     def __init__(self) -> None:
         super().__init__()
@@ -50,6 +52,8 @@ class HistoryModel(QAbstractListModel):
             return item.title
         if role == self.CommandRole:
             return item.command
+        if role == self.PacketsRole:
+            return item.packets
         if role == self.OutputRole:
             return item.output
         if role == self.OkRole:
@@ -60,6 +64,7 @@ class HistoryModel(QAbstractListModel):
         return {
             self.TitleRole: QByteArray(b"title"),
             self.CommandRole: QByteArray(b"command"),
+            self.PacketsRole: QByteArray(b"packets"),
             self.OutputRole: QByteArray(b"output"),
             self.OkRole: QByteArray(b"ok"),
         }
@@ -76,12 +81,14 @@ class LightingUiModel(QObject):
     selectedPanelChanged = Signal()
     backendModeChanged = Signal()
     coverLogoStateChanged = Signal()
+    historyLogChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         self._status = "Ready"
         self._selected_panel = "Main Keyboard"
         self._history = HistoryModel()
+        self._history_log = ""
         self._backend_mode = self._detect_backend_mode()
         self._magkey_state: dict[str, tuple[int, int, int]] = {
             "w": (0, 0, 0),
@@ -130,6 +137,10 @@ class LightingUiModel(QObject):
     @Property(QObject, constant=True)
     def history(self) -> QObject:
         return self._history
+
+    @Property(str, notify=historyLogChanged)
+    def historyLog(self) -> str:
+        return self._history_log
 
     @Property(int, notify=coverLogoStateChanged)
     def coverLogoStateVersion(self) -> int:
@@ -261,12 +272,45 @@ class LightingUiModel(QObject):
             lines.append("note=no mock output available")
         return "\n".join(lines)
 
+    def _extract_packet_preview(self, output: str) -> str:
+        packet_lines: list[str] = []
+        for line in output.splitlines():
+            lowered = line.lower()
+            if (
+                "packet=" in lowered
+                or lowered.startswith("payload=")
+                or lowered.startswith("commit=")
+                or lowered.startswith("prelude")
+            ):
+                packet_lines.append(line)
+        return "\n".join(packet_lines)
+
+    def _append_history_log(self, record: CommandRecord) -> None:
+        sections = [
+            f"[{record.title}] {'OK' if record.ok else 'FAIL'}",
+            record.command,
+        ]
+        if record.packets:
+            sections.extend(["Packet Preview:", record.packets])
+        sections.extend(["Output:", record.output])
+        block = "\n".join(sections)
+        self._history_log = f"{block}\n\n{self._history_log}".strip()
+        self.historyLogChanged.emit()
+
     def _run_daemon_command(self, title: str, args: list[str]) -> bool:
         command = [str(DAEMON_BIN), *args] if DAEMON_BIN.exists() else ["cargo", "run", "--quiet", "--", *args]
         pretty = " ".join(command)
         if self._backend_mode == "mock":
             output = self._mock_output(title, args)
-            self._history.prepend(CommandRecord(title=title, command=f"mock {' '.join(args)}", output=output, ok=True))
+            record = CommandRecord(
+                title=title,
+                command=f"mock {' '.join(args)}",
+                packets=self._extract_packet_preview(output),
+                output=output,
+                ok=True,
+            )
+            self._history.prepend(record)
+            self._append_history_log(record)
             self._status = "Mock backend command recorded"
             self.statusChanged.emit()
             return True
@@ -286,7 +330,15 @@ class LightingUiModel(QObject):
             output_parts.append(completed.stderr.strip())
         output = "\n".join(output_parts) if output_parts else "(no output)"
         ok = completed.returncode == 0
-        self._history.prepend(CommandRecord(title=title, command=pretty, output=output, ok=ok))
+        record = CommandRecord(
+            title=title,
+            command=pretty,
+            packets=self._extract_packet_preview(output),
+            output=output,
+            ok=ok,
+        )
+        self._history.prepend(record)
+        self._append_history_log(record)
         self._status = "Last command succeeded" if ok else "Last command failed"
         self.statusChanged.emit()
         return ok
@@ -314,17 +366,18 @@ class LightingUiModel(QObject):
     @Slot(str, int, int, int)
     def setKeyboardKeyColor(self, key: str, red: int, green: int, blue: int) -> None:
         if key not in SAFE_KEYBOARD_PATCH_KEYS:
-            self._history.prepend(
-                CommandRecord(
-                    title=f"Keyboard Key {key}",
-                    command="(blocked)",
-                    output=(
-                        "General per-key keyboard writes are not stable yet on PH18-72. "
-                        "Only the stubborn correction keys are enabled for now: 5, semicolon, keypad_6, arrow_down."
-                    ),
-                    ok=False,
-                )
+            record = CommandRecord(
+                title=f"Keyboard Key {key}",
+                command="(blocked)",
+                packets="",
+                output=(
+                    "General per-key keyboard writes are not stable yet on PH18-72. "
+                    "Only the stubborn correction keys are enabled for now: 5, semicolon, keypad_6, arrow_down."
+                ),
+                ok=False,
             )
+            self._history.prepend(record)
+            self._append_history_log(record)
             self._status = "Blocked unsafe per-key keyboard write"
             self.statusChanged.emit()
             return
@@ -446,14 +499,15 @@ class LightingUiModel(QObject):
 
     @Slot()
     def noteUnimplemented(self) -> None:
-        self._history.prepend(
-            CommandRecord(
-                title="Unimplemented Surface",
-                command="(no command)",
-                output="This surface is still in development. No controller command is sent yet.",
-                ok=False,
-            )
+        record = CommandRecord(
+            title="Unimplemented Surface",
+            command="(no command)",
+            packets="",
+            output="This surface is still in development. No controller command is sent yet.",
+            ok=False,
         )
+        self._history.prepend(record)
+        self._append_history_log(record)
         self._status = "In-development surface selected"
         self.statusChanged.emit()
 
