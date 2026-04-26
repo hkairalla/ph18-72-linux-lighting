@@ -677,6 +677,39 @@ ApplicationWindow {
                                         SpinBox { id: coverGreen; from: 0; to: 255; value: 0; editable: true }
                                         Label { text: "B"; color: "#cfd7df"; font.pixelSize: 13 }
                                         SpinBox { id: coverBlue; from: 0; to: 255; value: 255; editable: true }
+                                        Label { text: "Brightness: " + Math.round(coverBrightness.value); color: "#cfd7df"; font.pixelSize: 13 }
+                                        Slider {
+                                            id: coverBrightness
+                                            from: 0
+                                            to: 100
+                                            value: 100
+                                            stepSize: 1
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Button {
+                                            text: "Apply Brightness"
+                                            Layout.fillWidth: true
+                                            implicitWidth: 0
+                                            Layout.maximumWidth: parent.width - 24
+                                            onClicked: lightingUiModel.setCoverLogoBrightness(Math.round(coverBrightness.value))
+
+                                            background: Rectangle {
+                                                radius: 6
+                                                color: root.testingButtonColor
+                                                border.color: root.testingButtonBorder
+                                            }
+
+                                            contentItem: Label {
+                                                text: parent.text
+                                                color: root.testingButtonText
+                                                font.pixelSize: 13
+                                                font.bold: true
+                                                elide: Text.ElideRight
+                                                horizontalAlignment: Text.AlignHCenter
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+                                        }
 
                                         Button {
                                             text: "Apply Cover Color"

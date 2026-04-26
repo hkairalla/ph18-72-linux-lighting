@@ -238,6 +238,15 @@ class LightingUiModel(QObject):
                     f"rgb={args[args.index('--red') + 1]},{args[args.index('--green') + 1]},{args[args.index('--blue') + 1]}",
                 ]
             )
+        elif command_name == "set-cover-logo-brightness":
+            lines.extend(
+                [
+                    "action=set-cover-logo-brightness",
+                    "controller=0d62:ba51",
+                    "path=darfon_short_packets",
+                    f"level={args[args.index('--level') + 1]}",
+                ]
+            )
         else:
             lines.append("note=no mock output available")
         return "\n".join(lines)
@@ -385,6 +394,13 @@ class LightingUiModel(QObject):
         if segment != "all":
             args.extend(["--segment", segment])
         self._run_daemon_command(f"Cover Logo {segment}", args)
+
+    @Slot(int)
+    def setCoverLogoBrightness(self, level: int) -> None:
+        self._run_daemon_command(
+            "Cover Logo Brightness",
+            ["set-cover-logo-brightness", "--level", str(max(0, min(100, level)))],
+        )
 
     @Slot()
     def noteUnimplemented(self) -> None:

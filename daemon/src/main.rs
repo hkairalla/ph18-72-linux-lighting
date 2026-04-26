@@ -101,6 +101,11 @@ enum Command {
         #[arg(long, default_value_t = false)]
         no_force_brightness: bool,
     },
+    /// Set Darfon cover logo brightness 0-100.
+    SetCoverLogoBrightness {
+        #[arg(long)]
+        level: u8,
+    },
 }
 
 fn main() {
@@ -132,6 +137,7 @@ fn main() {
             blue,
             no_force_brightness,
         } => set_cover_logo(segment.as_deref(), (red, green, blue), !no_force_brightness),
+        Command::SetCoverLogoBrightness { level } => set_cover_logo_brightness(level),
     };
 
     if let Err(err) = result {
@@ -409,6 +415,24 @@ fn set_cover_logo(segment: Option<&str>, color: (u8, u8, u8), force_brightness: 
     }
 
     for (method, outcome) in results {
+        println!("{method}={outcome}");
+    }
+    println!("result=sent");
+    Ok(())
+}
+
+fn set_cover_logo_brightness(level: u8) -> io::Result<()> {
+    let node = find_darfon_node()?;
+    let payload = darfon_brightness_packet(level);
+
+    println!("action=set-cover-logo-brightness");
+    println!("controller=0d62:ba51");
+    println!("path=darfon_short_packets");
+    println!("hidraw={}", node.display());
+    println!("level={}", level.min(100));
+    println!("brightness_packet={}", hex_string(&payload));
+
+    for (method, outcome) in attempt_darfon_transports(&node, &payload) {
         println!("{method}={outcome}");
     }
     println!("result=sent");
