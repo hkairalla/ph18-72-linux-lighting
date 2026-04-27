@@ -325,7 +325,7 @@ function initMagkeyPanel() {
     ]);
   });
 
-  // Apply whole key
+  // Apply whole key — set all 3 zones of the selected key to the slider color
   document.getElementById('btn-mk-apply-key').addEventListener('click', () => {
     if (state.mkEmitter === null) return;
     const r = +document.getElementById('mk-r').value;
@@ -335,16 +335,7 @@ function initMagkeyPanel() {
     const base = {'w':0,'a':3,'s':6,'d':9}[m.key];
     state.emitterColors[base] = state.emitterColors[base+1] = state.emitterColors[base+2] = [r,g,b];
     updateAllEmitterSvg();
-    runDaemon(['set-magkeys-pattern',
-      '--w', state.emitterColors.slice(0,3).map(c=>c.join(',')).join(' '),
-      '--a', state.emitterColors.slice(3,6).map(c=>c.join(',')).join(' '),
-      '--s', state.emitterColors.slice(6,9).map(c=>c.join(',')).join(' '),
-      '--d', state.emitterColors.slice(9,12).map(c=>c.join(',')).join(' '),
-    ]);
-    // Simpler: use set-magkey-whole-key
-    runDaemon(['set-magkey-whole-key', '--key', m.key, '--color',
-      r===255&&g===0&&b===0?'red' : r===0&&g===255&&b===0?'green' : r===0&&g===0&&b===255?'blue' : 'off'
-    ]);
+    runDaemon(['set-magkey-key', '--key', m.key, '--red', r, '--green', g, '--blue', b]);
   });
 
   // Apply all keys
