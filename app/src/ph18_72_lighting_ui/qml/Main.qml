@@ -295,7 +295,8 @@ ApplicationWindow {
                                 }
 
                                 Rectangle {
-                                    Layout.preferredWidth: 240
+                                    Layout.preferredWidth: 300
+                                    Layout.minimumWidth: 300
                                     Layout.fillHeight: true
                                     radius: 6
                                     color: "#10151a"
@@ -411,8 +412,10 @@ ApplicationWindow {
 
                     Item {
                         ColumnLayout {
+                            id: magkeyLayout
                             anchors.fill: parent
                             spacing: 14
+                            property string selectedAnimMode: "wheel"
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -456,13 +459,20 @@ ApplicationWindow {
 
                                                     background: Rectangle {
                                                         radius: 6
-                                                        color: root.selectedMagkey === modelData.name ? "#31404e" : "#182028"
+                                                        color: {
+                                                            const version = lightingUiModel.magkeyStateVersion
+                                                            return lightingUiModel.magkeyButtonColor(modelData.name)
+                                                        }
                                                         border.color: root.selectedMagkey === modelData.name ? "#84a1bc" : "#2a323b"
+                                                        border.width: root.selectedMagkey === modelData.name ? 2 : 1
                                                     }
 
                                                     contentItem: Label {
                                                         text: parent.text
-                                                        color: "#eef2f7"
+                                                        color: {
+                                                            const version = lightingUiModel.magkeyStateVersion
+                                                            return lightingUiModel.magkeyButtonTextColor(modelData.name)
+                                                        }
                                                         font.pixelSize: 16
                                                         font.bold: true
                                                         horizontalAlignment: Text.AlignHCenter
@@ -493,60 +503,73 @@ ApplicationWindow {
                                             font.bold: true
                                         }
 
-                                        Label { text: "R"; color: "#cfd7df"; font.pixelSize: 13 }
-                                        SpinBox { id: magkeyRed; from: 0; to: 255; value: 0; editable: true }
-                                        Label { text: "G"; color: "#cfd7df"; font.pixelSize: 13 }
-                                        SpinBox { id: magkeyGreen; from: 0; to: 255; value: 0; editable: true }
-                                        Label { text: "B"; color: "#cfd7df"; font.pixelSize: 13 }
-                                        SpinBox { id: magkeyBlue; from: 0; to: 255; value: 255; editable: true }
+                                        Label {
+                                            text: "Apply Safe Named Color"
+                                            color: "#cfd7df"
+                                            font.pixelSize: 13
+                                        }
 
-                                        Button {
-                                            text: "Apply Selected MagKey"
+                                        ColumnLayout {
+                                            spacing: 8
                                             Layout.fillWidth: true
-                                            implicitWidth: 0
-                                            Layout.maximumWidth: parent.width - 24
-                                            onClicked: lightingUiModel.setMagkeyKeyColor(
-                                                root.selectedMagkey,
-                                                magkeyRed.value,
-                                                magkeyGreen.value,
-                                                magkeyBlue.value
-                                            )
 
-                                            background: Rectangle {
-                                                radius: 6
-                                                color: root.testingButtonColor
-                                                border.color: root.testingButtonBorder
-                                            }
+                                            Repeater {
+                                                model: [
+                                                    { label: "Off", name: "off" },
+                                                    { label: "Red", name: "red" },
+                                                    { label: "Green", name: "green" },
+                                                    { label: "Blue", name: "blue" }
+                                                ]
 
-                                            contentItem: Label {
-                                                text: parent.text
-                                                color: root.testingButtonText
-                                                font.pixelSize: 13
-                                                font.bold: true
-                                                elide: Text.ElideRight
-                                                horizontalAlignment: Text.AlignHCenter
-                                                verticalAlignment: Text.AlignVCenter
+                                                delegate: Button {
+                                                    required property var modelData
+                                                    text: modelData.label
+                                                    Layout.fillWidth: true
+                                                    implicitHeight: 40
+                                                    enabled: !lightingUiModel.animationRunning
+                                                    onClicked: lightingUiModel.setMagkeyNamedColor(root.selectedMagkey, modelData.name)
+
+                                                    background: Rectangle {
+                                                        radius: 6
+                                                        color: parent.enabled ? root.testingButtonColor : "#38424c"
+                                                        border.color: parent.enabled ? root.testingButtonBorder : "#48535e"
+                                                    }
+
+                                                    contentItem: Label {
+                                                        text: parent.text
+                                                        color: parent.enabled ? root.testingButtonText : "#b8c0c8"
+                                                        font.pixelSize: 13
+                                                        font.bold: true
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+                                                }
                                             }
                                         }
 
                                         Label {
-                                            text: "MagKey single-key tests are interference-prone because the hardware shares slot lanes across neighboring keys."
-                                            color: "#d9b86c"
+                                            text: lightingUiModel.animationRunning
+                                                  ? "Stop the animation to use manual controls."
+                                                  : "All four colors confirmed working on all four keys. Full RGB available via zone controls."
+                                            color: lightingUiModel.animationRunning ? "#d9b86c" : "#6bbf8a"
                                             font.pixelSize: 12
                                             wrapMode: Text.Wrap
+                                            Layout.fillWidth: true
                                         }
                                     }
                                 }
                             }
 
-                            Label { text: "Known-safe MagKey commands"; color: "#cfd7df"; font.pixelSize: 16 }
+                            Label { text: "Whole-key commands"; color: "#cfd7df"; font.pixelSize: 16 }
                             RowLayout {
                                 spacing: 10
+                                enabled: !lightingUiModel.animationRunning
 
                                 Repeater {
                                     model: [
-                                        { label: "Blue", fn: function() { lightingUiModel.setMagkeysBlue() } },
-                                        { label: "Red", fn: function() { lightingUiModel.setMagkeysRed() } },
+                                        { label: "Off",   fn: function() { lightingUiModel.setMagkeysOff() } },
+                                        { label: "Blue",  fn: function() { lightingUiModel.setMagkeysBlue() } },
+                                        { label: "Red",   fn: function() { lightingUiModel.setMagkeysRed() } },
                                         { label: "Green", fn: function() { lightingUiModel.setMagkeysGreen() } }
                                     ]
 
@@ -575,10 +598,80 @@ ApplicationWindow {
                                 Button { text: "Restore Known Good"; onClicked: lightingUiModel.restoreKnownGood() }
                             }
 
-                            Label {
-                                text: "Yellow means this command is still under live hardware validation."
-                                color: "#d9b86c"
-                                font.pixelSize: 13
+                            Label { text: "Animations"; color: "#cfd7df"; font.pixelSize: 16 }
+
+                            RowLayout {
+                                spacing: 6
+
+                                Repeater {
+                                    model: ["wheel", "knight", "hue", "chase", "breathe", "zone", "cascade"]
+
+                                    delegate: Button {
+                                        required property string modelData
+                                        text: modelData
+                                        implicitHeight: 32
+
+                                        onClicked: magkeyLayout.selectedAnimMode = modelData
+
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: magkeyLayout.selectedAnimMode === modelData
+                                                   ? "#2a4a6a" : "#182028"
+                                            border.color: magkeyLayout.selectedAnimMode === modelData
+                                                          ? "#5a9fd4" : "#2a323b"
+                                        }
+
+                                        contentItem: Label {
+                                            text: parent.text
+                                            color: "#eef2f7"
+                                            font.pixelSize: 12
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                spacing: 10
+
+                                Button {
+                                    text: lightingUiModel.animationRunning ? "■  Stop" : "▶  Start"
+                                    implicitWidth: 110
+                                    onClicked: {
+                                        if (lightingUiModel.animationRunning) {
+                                            lightingUiModel.stopMagkeyAnimation()
+                                        } else {
+                                            lightingUiModel.startMagkeyAnimation(magkeyLayout.selectedAnimMode)
+                                        }
+                                    }
+
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: lightingUiModel.animationRunning ? "#4a1a1a" : "#1a3a1a"
+                                        border.color: lightingUiModel.animationRunning ? "#c04040" : "#40a040"
+                                    }
+
+                                    contentItem: Label {
+                                        text: parent.text
+                                        color: "#eef2f7"
+                                        font.pixelSize: 14
+                                        font.bold: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 10; height: 10; radius: 5
+                                    color: lightingUiModel.animationRunning ? "#40c040" : "#384048"
+                                }
+
+                                Label {
+                                    text: lightingUiModel.animationRunning ? "running" : "stopped"
+                                    color: lightingUiModel.animationRunning ? "#6bbf8a" : "#8090a0"
+                                    font.pixelSize: 13
+                                }
                             }
                         }
                     }

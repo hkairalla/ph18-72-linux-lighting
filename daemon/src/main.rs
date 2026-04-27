@@ -76,6 +76,8 @@ enum Command {
         s: String,
         #[arg(long)]
         d: String,
+        #[arg(long, default_value_t = false)]
+        safe_magkeys: bool,
     },
     /// Set one MagKey through the ff02 LED-map path.
     SetMagkeyKey {
@@ -87,6 +89,34 @@ enum Command {
         green: u8,
         #[arg(long)]
         blue: u8,
+        #[arg(long, default_value_t = false)]
+        safe_magkeys: bool,
+    },
+    /// Set one MagKey using a named whole-key preset across all three words.
+    SetMagkeyWholeKey {
+        #[arg(long)]
+        key: String,
+        #[arg(long)]
+        color: String,
+    },
+    /// Set all four MagKeys using a named whole-key preset across all three words.
+    SetMagkeysWhole {
+        #[arg(long)]
+        color: String,
+    },
+    /// Set one MagKey with independent per-zone RGB values (left/top/right).
+    SetMagkeyZones {
+        #[arg(long)]
+        key: String,
+        /// R,G,B for the left zone
+        #[arg(long)]
+        left: String,
+        /// R,G,B for the top zone
+        #[arg(long)]
+        top: String,
+        /// R,G,B for the right zone
+        #[arg(long)]
+        right: String,
     },
     /// Set the Darfon cover logo as a whole or one segment at a time.
     SetCoverLogo {
@@ -123,13 +153,28 @@ fn main() {
             blue,
         } => set_keyboard_key(&key, (red, green, blue)),
         Command::SetMagkeys { all } => set_magkeys(all),
-        Command::SetMagkeysPattern { w, a, s, d } => set_magkeys_pattern(&w, &a, &s, &d),
+        Command::SetMagkeysPattern {
+            w,
+            a,
+            s,
+            d,
+            safe_magkeys,
+        } => set_magkeys_pattern(&w, &a, &s, &d, safe_magkeys),
         Command::SetMagkeyKey {
             key,
             red,
             green,
             blue,
-        } => set_magkey_key(&key, (red, green, blue)),
+            safe_magkeys,
+        } => set_magkey_key(&key, (red, green, blue), safe_magkeys),
+        Command::SetMagkeyWholeKey { key, color } => set_magkey_whole_key(&key, &color),
+        Command::SetMagkeysWhole { color } => set_magkeys_whole(&color),
+        Command::SetMagkeyZones { key, left, top, right } => (|| {
+            let l = parse_rgb_csv(&left)?;
+            let t = parse_rgb_csv(&top)?;
+            let r = parse_rgb_csv(&right)?;
+            set_magkey_zones(&key, l, t, r)
+        })(),
         Command::SetCoverLogo {
             segment,
             red,
@@ -307,7 +352,10 @@ fn set_magkeys(all: Option<String>) -> io::Result<()> {
     Ok(())
 }
 
-fn set_magkeys_pattern(w: &str, a: &str, s: &str, d: &str) -> io::Result<()> {
+fn set_magkeys_pattern(w: &str, a: &str, s: &str, d: &str, safe_magkeys: bool) -> io::Result<()> {
+    if safe_magkeys {
+        eprintln!("note: --safe-magkeys is no longer needed; the corrected frame model handles blue routing correctly");
+    }
     let entries = [
         ("w", parse_rgb_csv(w)?),
         ("a", parse_rgb_csv(a)?),
@@ -338,11 +386,17 @@ fn set_magkeys_pattern(w: &str, a: &str, s: &str, d: &str) -> io::Result<()> {
     );
     println!("commit={}", hex_string(&MAGKEY_COMMIT_PACKET));
     println!("payload={}", hex_string(&payload));
+    if safe_magkeys {
+        println!("mode=safe-magkeys");
+    }
     println!("result=sent");
     Ok(())
 }
 
-fn set_magkey_key(key: &str, color: (u8, u8, u8)) -> io::Result<()> {
+fn set_magkey_key(key: &str, color: (u8, u8, u8), safe_magkeys: bool) -> io::Result<()> {
+    if safe_magkeys {
+        eprintln!("note: --safe-magkeys is no longer needed; the corrected frame model handles blue routing correctly");
+    }
     let normalized = normalize_name(key);
     if !MAGKEY_KEYS.contains(&normalized.as_str()) {
         return Err(io::Error::new(
@@ -362,21 +416,108 @@ fn set_magkey_key(key: &str, color: (u8, u8, u8)) -> io::Result<()> {
     println!("rgb={},{},{}", color.0, color.1, color.2);
     println!("commit={}", hex_string(&MAGKEY_COMMIT_PACKET));
     println!("payload={}", hex_string(&payload));
+    if safe_magkeys {
+        println!("mode=safe-magkeys");
+    }
+    println!("result=sent");
+    Ok(())
+}
+
+fn set_magkey_whole_key(key: &str, color: &str) -> io::Result<()> {
+    let normalized = normalize_name(key);
+    if !MAGKEY_KEYS.contains(&normalized.as_str()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown magkey {key}"),
+        ));
+    }
+    let rgb = magkey_named_color(color)?;
+    let base = magkey_slot(&normalized);
+    let mut emitters = [(0u8, 0u8, 0u8); 12];
+    emitters[base]     = rgb;
+    emitters[base + 1] = rgb;
+    emitters[base + 2] = rgb;
+    let frame = build_magkey_frame(&emitters);
+    let (node, payload) = apply_magkey_frame(&frame)?;
+
+    println!("action=set-magkey-whole-key");
+    println!("controller=05af:866a");
+    println!("path=ff02_ledmap_commit");
+    println!("hidraw={}", node.display());
+    println!("key={normalized}");
+    println!("color={}", normalize_name(color));
+    println!("rgb={},{},{}", rgb.0, rgb.1, rgb.2);
+    println!("commit={}", hex_string(&MAGKEY_COMMIT_PACKET));
+    println!("payload={}", hex_string(&payload));
+    println!("result=sent");
+    Ok(())
+}
+
+fn set_magkeys_whole(color: &str) -> io::Result<()> {
+    let rgb = magkey_named_color(color)?;
+    let emitters = [rgb; 12];
+    let frame = build_magkey_frame(&emitters);
+    let (node, payload) = apply_magkey_frame(&frame)?;
+
+    println!("action=set-magkeys-whole");
+    println!("controller=05af:866a");
+    println!("path=ff02_ledmap_commit");
+    println!("hidraw={}", node.display());
+    println!("color={}", normalize_name(color));
+    println!("rgb={},{},{}", rgb.0, rgb.1, rgb.2);
+    println!("commit={}", hex_string(&MAGKEY_COMMIT_PACKET));
+    println!("payload={}", hex_string(&payload));
+    println!("result=sent");
+    Ok(())
+}
+
+fn set_magkey_zones(
+    key: &str,
+    left: (u8, u8, u8),
+    top: (u8, u8, u8),
+    right: (u8, u8, u8),
+) -> io::Result<()> {
+    let normalized = normalize_name(key);
+    if !MAGKEY_KEYS.contains(&normalized.as_str()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown magkey {key}"),
+        ));
+    }
+    let base = magkey_slot(&normalized);
+    let mut emitters = [(0u8, 0u8, 0u8); 12];
+    emitters[base]     = left;
+    emitters[base + 1] = top;
+    emitters[base + 2] = right;
+    let frame = build_magkey_frame(&emitters);
+    let (node, payload) = apply_magkey_frame(&frame)?;
+
+    println!("action=set-magkey-zones");
+    println!("controller=05af:866a");
+    println!("path=ff02_ledmap_commit");
+    println!("hidraw={}", node.display());
+    println!("key={normalized}");
+    println!("left={},{},{}", left.0, left.1, left.2);
+    println!("top={},{},{}", top.0, top.1, top.2);
+    println!("right={},{},{}", right.0, right.1, right.2);
+    println!("commit={}", hex_string(&MAGKEY_COMMIT_PACKET));
+    println!("payload={}", hex_string(&payload));
     println!("result=sent");
     Ok(())
 }
 
 fn apply_magkey_entries(entries: &[(&str, (u8, u8, u8))]) -> io::Result<(PathBuf, [u8; 64])> {
-    let node = find_ff02_node()?;
-    let payload = build_magkey_payload(entries);
+    apply_magkey_frame(&build_magkey_payload(entries))
+}
 
+fn apply_magkey_frame(payload: &[u8; 64]) -> io::Result<(PathBuf, [u8; 64])> {
+    let node = find_ff02_node()?;
     for packet in PKT_PRELUDE {
         send_feature_ff02(&node, &packet)?;
     }
-
-    send_out64(&node, &payload)?;
+    send_out64(&node, payload)?;
     send_feature_ff02(&node, &MAGKEY_COMMIT_PACKET)?;
-    Ok((node, payload))
+    Ok((node, *payload))
 }
 
 fn set_cover_logo(segment: Option<&str>, color: (u8, u8, u8), force_brightness: bool) -> io::Result<()> {
@@ -565,25 +706,50 @@ fn keyboard_frame(word: [u8; 4]) -> [u8; 64] {
     frame
 }
 
-fn build_magkey_payload(entries: &[(&str, (u8, u8, u8))]) -> [u8; 64] {
-    let mut payload = [0_u8; 64];
-
-    for (key, color) in entries {
-        let word = magkey_word(*color);
-        let start = magkey_slot(key) * 4;
-        for offset in [0_usize, 4, 8] {
-            payload[start + offset..start + offset + 4].copy_from_slice(&word);
-        }
+/// Build a 64-byte MagKey payload from per-emitter RGB values.
+///
+/// Emitter numbering:
+///    0=W-left   1=W-top   2=W-right
+///    3=A-left   4=A-top   5=A-right
+///    6=S-left   7=S-top   8=S-right
+///    9=D-left  10=D-top  11=D-right
+///
+/// Verified word model (2026-04-26):
+///   frame[N*4+2] = red   for emitter N
+///   frame[N*4+3] = green for emitter N
+///   frame[(N+1)*4] = blue for emitter N  (routed via the next word's byte0)
+fn build_magkey_frame(emitters: &[(u8, u8, u8); 12]) -> [u8; 64] {
+    let mut frame = [0u8; 64];
+    for (i, &(r, g, b)) in emitters.iter().enumerate() {
+        frame[i * 4 + 2] = r;
+        frame[i * 4 + 3] = g;
+        frame[(i + 1) * 4] = b;
     }
-
-    payload
+    frame
 }
 
-fn magkey_word(color: (u8, u8, u8)) -> [u8; 4] {
-    let (red, green, blue) = color;
-    let byte0 = if blue > 0 { 0xff } else { 0x00 };
-    let byte3 = if blue > 0 { blue } else { green };
-    [byte0, 0x00, red, byte3]
+fn build_magkey_payload(entries: &[(&str, (u8, u8, u8))]) -> [u8; 64] {
+    let mut emitters = [(0u8, 0u8, 0u8); 12];
+    for &(key, color) in entries {
+        let base = magkey_slot(key);
+        emitters[base]     = color;
+        emitters[base + 1] = color;
+        emitters[base + 2] = color;
+    }
+    build_magkey_frame(&emitters)
+}
+
+fn magkey_named_color(color: &str) -> io::Result<(u8, u8, u8)> {
+    match normalize_name(color).as_str() {
+        "red"   => Ok((255, 0, 0)),
+        "green" => Ok((0, 255, 0)),
+        "blue"  => Ok((0, 0, 255)),
+        "off"   => Ok((0, 0, 0)),
+        other   => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown color preset '{other}'; expected red, green, blue, or off"),
+        )),
+    }
 }
 
 fn magkey_slot(key: &str) -> usize {

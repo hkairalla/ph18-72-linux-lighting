@@ -16,6 +16,7 @@ APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parents[2]
 DAEMON_DIR = REPO_ROOT / "daemon"
 DAEMON_BIN = DAEMON_DIR / "target" / "debug" / "ph18-lighting-daemon"
+DEMO_SCRIPT = REPO_ROOT / "testing" / "python" / "magkey_demo.py"
 SAFE_KEYBOARD_PATCH_KEYS = {"5", "semicolon", "keypad_6", "arrow_down"}
 
 
@@ -81,7 +82,9 @@ class LightingUiModel(QObject):
     selectedPanelChanged = Signal()
     backendModeChanged = Signal()
     coverLogoStateChanged = Signal()
+    magkeyStateChanged = Signal()
     historyLogChanged = Signal()
+    animationRunningChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -90,6 +93,7 @@ class LightingUiModel(QObject):
         self._history = HistoryModel()
         self._history_log = ""
         self._backend_mode = self._detect_backend_mode()
+        self._animation_process: subprocess.Popen | None = None
         self._magkey_state: dict[str, tuple[int, int, int]] = {
             "w": (0, 0, 0),
             "a": (0, 0, 0),
@@ -145,6 +149,10 @@ class LightingUiModel(QObject):
     @Property(int, notify=coverLogoStateChanged)
     def coverLogoStateVersion(self) -> int:
         return sum(sum(color) for color in self._cover_logo_state.values())
+
+    @Property(int, notify=magkeyStateChanged)
+    def magkeyStateVersion(self) -> int:
+        return sum(sum(color) for color in self._magkey_state.values())
 
     def _mock_output(self, title: str, args: list[str]) -> str:
         command_name = args[0]
@@ -236,6 +244,8 @@ class LightingUiModel(QObject):
                     f"d={args[args.index('--d') + 1]}",
                 ]
             )
+            if "--safe-magkeys" in args:
+                lines.append("mode=safe-magkeys")
         elif command_name == "set-magkey-key":
             lines.extend(
                 [
@@ -401,23 +411,34 @@ class LightingUiModel(QObject):
     def setMagkeysBlue(self) -> None:
         for key in self._magkey_state:
             self._magkey_state[key] = (0, 0, 255)
+        self.magkeyStateChanged.emit()
         self._run_daemon_command("MagKeys Blue", ["set-magkeys", "--all", "0,0,255"])
 
     @Slot()
     def setMagkeysRed(self) -> None:
         for key in self._magkey_state:
             self._magkey_state[key] = (255, 0, 0)
+        self.magkeyStateChanged.emit()
         self._run_daemon_command("MagKeys Red", ["set-magkeys", "--all", "255,0,0"])
 
     @Slot()
     def setMagkeysGreen(self) -> None:
         for key in self._magkey_state:
             self._magkey_state[key] = (0, 255, 0)
+        self.magkeyStateChanged.emit()
         self._run_daemon_command("MagKeys Green", ["set-magkeys", "--all", "0,255,0"])
+
+    @Slot()
+    def setMagkeysOff(self) -> None:
+        for key in self._magkey_state:
+            self._magkey_state[key] = (0, 0, 0)
+        self.magkeyStateChanged.emit()
+        self._run_daemon_command("MagKeys Off", ["set-magkeys", "--all", "0,0,0"])
 
     @Slot(str, int, int, int)
     def setMagkeyKeyColor(self, key: str, red: int, green: int, blue: int) -> None:
         self._magkey_state[key] = canonicalize_magkey_rgb(red, green, blue)
+        self.magkeyStateChanged.emit()
         w = ",".join(str(component) for component in self._magkey_state["w"])
         a = ",".join(str(component) for component in self._magkey_state["a"])
         s = ",".join(str(component) for component in self._magkey_state["s"])
@@ -436,6 +457,44 @@ class LightingUiModel(QObject):
                 d,
             ],
         )
+
+    @Slot(str, str)
+    def setMagkeyNamedColor(self, key: str, name: str) -> None:
+        colors = {
+            "off": (0, 0, 0),
+            "red": (255, 0, 0),
+            "green": (0, 255, 0),
+            "blue": (0, 0, 255),
+        }
+        color = colors.get(name, (0, 0, 0))
+        for other_key in self._magkey_state:
+            self._magkey_state[other_key] = (0, 0, 0)
+        self._magkey_state[key] = color
+        self.magkeyStateChanged.emit()
+        self._run_daemon_command(
+            f"MagKey {key.upper()} {name.title()}",
+            [
+                "set-magkeys-pattern",
+                "--w",
+                ",".join(str(component) for component in self._magkey_state["w"]),
+                "--a",
+                ",".join(str(component) for component in self._magkey_state["a"]),
+                "--s",
+                ",".join(str(component) for component in self._magkey_state["s"]),
+                "--d",
+                ",".join(str(component) for component in self._magkey_state["d"]),
+            ],
+        )
+
+    @Slot(str, result=str)
+    def magkeyButtonColor(self, key: str) -> str:
+        return rgb_to_hex(self._magkey_state.get(key, (24, 32, 40)))
+
+    @Slot(str, result=str)
+    def magkeyButtonTextColor(self, key: str) -> str:
+        color = self._magkey_state.get(key, (24, 32, 40))
+        brightness = (color[0] * 299 + color[1] * 587 + color[2] * 114) / 1000
+        return "#10151a" if brightness > 140 else "#eef2f7"
 
     @Slot()
     def setCoverLogoBlue(self) -> None:
@@ -496,6 +555,58 @@ class LightingUiModel(QObject):
             color = self._cover_logo_state.get(segment, (24, 32, 40))
         brightness = (color[0] * 299 + color[1] * 587 + color[2] * 114) / 1000
         return "#10151a" if brightness > 140 else "#eef2f7"
+
+    @Property(bool, notify=animationRunningChanged)
+    def animationRunning(self) -> bool:
+        return self._animation_process is not None and self._animation_process.poll() is None
+
+    @Slot(str)
+    def startMagkeyAnimation(self, mode: str) -> None:
+        self.stopMagkeyAnimation()
+        if not DEMO_SCRIPT.exists():
+            self._status = f"Demo script not found: {DEMO_SCRIPT}"
+            self.statusChanged.emit()
+            return
+        self._animation_process = subprocess.Popen(
+            [sys.executable, str(DEMO_SCRIPT), "--mode", mode],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self._status = f"Animation running: {mode}"
+        self.statusChanged.emit()
+        self.animationRunningChanged.emit()
+
+    @Slot()
+    def stopMagkeyAnimation(self) -> None:
+        if self._animation_process is not None:
+            self._animation_process.terminate()
+            try:
+                self._animation_process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self._animation_process.kill()
+            self._animation_process = None
+        self._status = "Animation stopped"
+        self.statusChanged.emit()
+        self.animationRunningChanged.emit()
+
+    @Slot(str, int, int, int, int, int, int, int, int, int)
+    def setMagkeyZones(
+        self,
+        key: str,
+        left_r: int, left_g: int, left_b: int,
+        top_r: int, top_g: int, top_b: int,
+        right_r: int, right_g: int, right_b: int,
+    ) -> None:
+        self._run_daemon_command(
+            f"MagKey {key.upper()} Zones",
+            [
+                "set-magkey-zones",
+                "--key", key,
+                "--left", f"{left_r},{left_g},{left_b}",
+                "--top", f"{top_r},{top_g},{top_b}",
+                "--right", f"{right_r},{right_g},{right_b}",
+            ],
+        )
 
     @Slot()
     def noteUnimplemented(self) -> None:
