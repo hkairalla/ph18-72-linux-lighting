@@ -2,15 +2,22 @@
    In production: window.pywebview.api.<method>() returns a Promise.
    In browser dev mode: mock shim so the UI is inspectable without Python.
 ──────────────────────────────────────────────────────────────────────── */
+// pywebview injects window.pywebview.api asynchronously after page load.
+// Proxy reads the real API at call time so we never get stuck on the mock.
 const api = (() => {
-  if (window.pywebview) return window.pywebview.api;
-  // dev shim
-  return {
-    get_backend_mode:    () => Promise.resolve('mock'),
-    get_history:         () => Promise.resolve([]),
-    run_daemon:          (args) => Promise.resolve({ ok: true, title: args[0], output: `mock: ${args.join(' ')}` }),
-    send_magkey_frame:   (_e)  => Promise.resolve('ok'),
+  const mock = {
+    get_backend_mode:  () => Promise.resolve('mock'),
+    get_history:       () => Promise.resolve([]),
+    run_daemon:        (args) => Promise.resolve({ ok: true, title: args[0], output: `mock: ${args.join(' ')}` }),
+    send_magkey_frame: (_e)  => Promise.resolve('ok'),
   };
+  return new Proxy({}, {
+    get(_, prop) {
+      const real = window.pywebview && window.pywebview.api;
+      const target = real || mock;
+      return typeof target[prop] === 'function' ? target[prop].bind(target) : target[prop];
+    },
+  });
 })();
 
 /* ── Keyboard layout ─────────────────────────────────────────────────*/
@@ -458,6 +465,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initKeyboardPanel();
   initMagkeyPanel();
   initCoverPanel();
-  initBackend();
   setStatus('Ready');
+  // pywebviewready fires once the Python API is injected; re-run badge check then.
+  // Also call immediately for browser dev mode where there is no pywebview.
+  initBackend();
+  window.addEventListener('pywebviewready', initBackend);
 });
