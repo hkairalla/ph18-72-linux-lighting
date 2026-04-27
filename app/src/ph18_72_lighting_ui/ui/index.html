@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PH18-72 Lighting</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-glow" id="bg-glow"></div>
+
+  <div class="app">
+
+    <!-- ── Tab bar ─────────────────────────────────────────────── -->
+    <nav class="tabs">
+      <button class="tab active" data-panel="keyboard">Keyboard</button>
+      <button class="tab"        data-panel="magkey">MagKey 3.0</button>
+      <button class="tab"        data-panel="base-logo">Base Logo</button>
+      <button class="tab"        data-panel="infinity">Infinity Mirror</button>
+      <button class="tab"        data-panel="cover-logo">Cover Logo</button>
+      <div class="tabs-end">
+        <span class="backend-badge" id="backend-badge">Mock</span>
+      </div>
+    </nav>
+
+    <!-- ── Panel container ────────────────────────────────────── -->
+    <div class="content">
+
+      <!-- Keyboard ──────────────────────────────────────────── -->
+      <div class="panel active" id="panel-keyboard">
+        <div class="panel-main keyboard-main">
+          <div class="section-label">Per-key Test Grid</div>
+          <div class="keyboard-grid" id="keyboard-grid"></div>
+        </div>
+        <div class="panel-sidebar">
+          <div class="sidebar-title" id="kb-selected-label">Select a key</div>
+          <div class="slider-group">
+            <div class="slider-row">
+              <span class="ch r">R</span>
+              <input type="range" class="slider red"   id="kb-r" min="0" max="255" value="0">
+              <span class="val" id="kb-r-val">0</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch g">G</span>
+              <input type="range" class="slider green" id="kb-g" min="0" max="255" value="0">
+              <span class="val" id="kb-g-val">0</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch b">B</span>
+              <input type="range" class="slider blue"  id="kb-b" min="0" max="255" value="255">
+              <span class="val" id="kb-b-val">255</span>
+            </div>
+          </div>
+          <div class="color-swatch" id="kb-swatch"></div>
+          <button class="btn-primary" id="btn-kb-apply">Apply Key</button>
+          <div class="sidebar-note">Only confirmed keys are enabled: 5/%, ;/:, Kp6, Down</div>
+          <div class="divider"></div>
+          <div class="section-label">Whole keyboard</div>
+          <div class="btn-row">
+            <button class="btn-preset blue-btn"  onclick="runDaemon(['set-main-keyboard-blue'])">Blue</button>
+            <button class="btn-preset red-btn"   onclick="runDaemon(['set-main-keyboard-red'])">Red</button>
+            <button class="btn-preset green-btn" onclick="runDaemon(['set-main-keyboard-green'])">Green</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MagKey 3.0 ────────────────────────────────────────── -->
+      <div class="panel" id="panel-magkey">
+        <div class="panel-main magkey-main">
+          <div class="section-label">Zone Map</div>
+          <div class="wasd-wrap">
+            <svg id="wasd-svg" viewBox="0 0 430 255" xmlns="http://www.w3.org/2000/svg">
+
+              <!-- Key background panels -->
+              <g class="key-panels">
+                <rect class="key-panel" id="kp-w" x="108" y="32" width="84" height="88" rx="10"/>
+                <rect class="key-panel" id="kp-a" x="28"  y="140" width="84" height="88" rx="10"/>
+                <rect class="key-panel" id="kp-s" x="148" y="140" width="84" height="88" rx="10"/>
+                <rect class="key-panel" id="kp-d" x="268" y="140" width="84" height="88" rx="10"/>
+              </g>
+
+              <!-- Key labels -->
+              <g class="key-labels">
+                <text x="150" y="80">W</text>
+                <text x="70"  y="185">A</text>
+                <text x="190" y="185">S</text>
+                <text x="310" y="185">D</text>
+              </g>
+
+              <!-- Triangle outlines (subtle) -->
+              <g class="tri-lines">
+                <polygon class="tri" points="120,118 150,65 180,118"/>
+                <polygon class="tri" points="40,218  70,165  100,218"/>
+                <polygon class="tri" points="160,218 190,165 220,218"/>
+                <polygon class="tri" points="280,218 310,165 340,218"/>
+              </g>
+
+              <!-- Emitter circles — W -->
+              <circle class="emitter" id="em-0"  cx="120" cy="118" r="16" data-key="w" data-zone="left"  data-idx="0"/>
+              <circle class="emitter" id="em-1"  cx="150" cy="65"  r="16" data-key="w" data-zone="top"   data-idx="1"/>
+              <circle class="emitter" id="em-2"  cx="180" cy="118" r="16" data-key="w" data-zone="right" data-idx="2"/>
+              <!-- A -->
+              <circle class="emitter" id="em-3"  cx="40"  cy="218" r="16" data-key="a" data-zone="left"  data-idx="3"/>
+              <circle class="emitter" id="em-4"  cx="70"  cy="165" r="16" data-key="a" data-zone="top"   data-idx="4"/>
+              <circle class="emitter" id="em-5"  cx="100" cy="218" r="16" data-key="a" data-zone="right" data-idx="5"/>
+              <!-- S -->
+              <circle class="emitter" id="em-6"  cx="160" cy="218" r="16" data-key="s" data-zone="left"  data-idx="6"/>
+              <circle class="emitter" id="em-7"  cx="190" cy="165" r="16" data-key="s" data-zone="top"   data-idx="7"/>
+              <circle class="emitter" id="em-8"  cx="220" cy="218" r="16" data-key="s" data-zone="right" data-idx="8"/>
+              <!-- D -->
+              <circle class="emitter" id="em-9"  cx="280" cy="218" r="16" data-key="d" data-zone="left"  data-idx="9"/>
+              <circle class="emitter" id="em-10" cx="310" cy="165" r="16" data-key="d" data-zone="top"   data-idx="10"/>
+              <circle class="emitter" id="em-11" cx="340" cy="218" r="16" data-key="d" data-zone="right" data-idx="11"/>
+
+              <!-- Zone labels (outside circles) -->
+              <g class="zone-labels">
+                <text x="120" y="140">L</text><text x="150" y="48">T</text><text x="180" y="140">R</text>
+                <text x="40"  y="240">L</text><text x="70"  y="148">T</text><text x="100" y="240">R</text>
+                <text x="160" y="240">L</text><text x="190" y="148">T</text><text x="220" y="240">R</text>
+                <text x="280" y="240">L</text><text x="310" y="148">T</text><text x="340" y="240">R</text>
+              </g>
+
+            </svg>
+          </div>
+        </div>
+
+        <div class="panel-sidebar">
+          <div class="sidebar-title" id="mk-selected-label">— select a zone —</div>
+          <div class="slider-group">
+            <div class="slider-row">
+              <span class="ch r">R</span>
+              <input type="range" class="slider red"   id="mk-r" min="0" max="255" value="0">
+              <span class="val" id="mk-r-val">0</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch g">G</span>
+              <input type="range" class="slider green" id="mk-g" min="0" max="255" value="0">
+              <span class="val" id="mk-g-val">0</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch b">B</span>
+              <input type="range" class="slider blue"  id="mk-b" min="0" max="255" value="0">
+              <span class="val" id="mk-b-val">0</span>
+            </div>
+          </div>
+          <div class="color-swatch" id="mk-swatch"></div>
+          <button class="btn-primary"   id="btn-mk-apply-zone">Apply Zone</button>
+          <button class="btn-secondary" id="btn-mk-apply-key">Apply Whole Key</button>
+          <button class="btn-secondary" id="btn-mk-apply-all">Apply All Keys</button>
+          <div class="divider"></div>
+          <div class="section-label">Quick Presets</div>
+          <div class="btn-row">
+            <button class="btn-preset"           onclick="mkAllNamed('off')">Off</button>
+            <button class="btn-preset blue-btn"  onclick="mkAllNamed('blue')">Blue</button>
+            <button class="btn-preset red-btn"   onclick="mkAllNamed('red')">Red</button>
+            <button class="btn-preset green-btn" onclick="mkAllNamed('green')">Green</button>
+          </div>
+          <div class="divider"></div>
+          <div class="section-label">Animation</div>
+          <select class="select-anim" id="anim-select">
+            <option value="">— none —</option>
+            <option value="wheel">Wheel</option>
+            <option value="knight">Knight</option>
+            <option value="hue">Hue</option>
+            <option value="chase">Chase</option>
+            <option value="breathe">Breathe</option>
+            <option value="zone">Zone</option>
+            <option value="cascade">Cascade</option>
+          </select>
+          <button class="btn-anim" id="btn-anim">▶ Start</button>
+        </div>
+      </div>
+
+      <!-- Cover Logo ────────────────────────────────────────── -->
+      <div class="panel" id="panel-cover-logo">
+        <div class="panel-main cover-main">
+          <div class="section-label">Logo Zones</div>
+          <div class="cover-vis" id="cover-vis">
+            <div class="cover-zone" id="cz-all"    data-seg="all">All</div>
+            <div class="cover-zone" id="cz-left"   data-seg="left">Left</div>
+            <div class="cover-zone" id="cz-middle" data-seg="middle">Mid</div>
+            <div class="cover-zone" id="cz-right"  data-seg="right">Right</div>
+          </div>
+          <div class="brightness-row">
+            <span class="icon-dim">☀</span>
+            <input type="range" id="cover-brightness" min="0" max="100" value="100">
+            <span class="icon-bright">☀</span>
+            <button class="btn-small" id="btn-brightness-apply">Set</button>
+          </div>
+        </div>
+        <div class="panel-sidebar">
+          <div class="sidebar-title" id="cl-selected-label">All Zones</div>
+          <div class="slider-group">
+            <div class="slider-row">
+              <span class="ch r">R</span>
+              <input type="range" class="slider red"   id="cl-r" min="0" max="255" value="0">
+              <span class="val" id="cl-r-val">0</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch g">G</span>
+              <input type="range" class="slider green" id="cl-g" min="0" max="255" value="0">
+              <span class="val" id="cl-g-val">0</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch b">B</span>
+              <input type="range" class="slider blue"  id="cl-b" min="0" max="255" value="255">
+              <span class="val" id="cl-b-val">255</span>
+            </div>
+          </div>
+          <div class="color-swatch" id="cl-swatch"></div>
+          <button class="btn-primary" id="btn-cl-apply">Apply</button>
+        </div>
+      </div>
+
+      <!-- Placeholders ──────────────────────────────────────── -->
+      <div class="panel" id="panel-base-logo">
+        <div class="placeholder">
+          <div class="placeholder-icon">⬡</div>
+          <div class="placeholder-title">Base Logo</div>
+          <div class="placeholder-sub">In development — no confirmed control path yet</div>
+        </div>
+      </div>
+      <div class="panel" id="panel-infinity">
+        <div class="placeholder">
+          <div class="placeholder-icon">◈</div>
+          <div class="placeholder-title">Infinity Mirror</div>
+          <div class="placeholder-sub">In development — no confirmed control path yet</div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+
+    <!-- ── Bottom bar ─────────────────────────────────────────── -->
+    <div class="bottom-bar">
+      <span class="status-dot" id="status-dot"></span>
+      <span class="status-text" id="status-text">Ready</span>
+      <button class="btn-text" id="btn-history-toggle">History ▾</button>
+    </div>
+
+    <!-- ── History drawer ─────────────────────────────────────── -->
+    <div class="history-drawer" id="history-drawer">
+      <div class="history-scroll" id="history-scroll">
+        <div class="history-placeholder">No commands yet.</div>
+      </div>
+    </div>
+
+  </div><!-- /app -->
+
+  <script src="app.js"></script>
+</body>
+</html>
