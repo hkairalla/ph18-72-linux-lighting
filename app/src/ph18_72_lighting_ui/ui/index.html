@@ -168,6 +168,20 @@
             <option value="cascade">Cascade</option>
           </select>
           <button class="btn-anim" id="btn-anim">▶ Start</button>
+          <div class="divider"></div>
+          <div class="section-label">Speed</div>
+          <div class="dial-row">
+            <svg class="speed-dial" id="speed-dial" viewBox="0 0 80 80">
+              <circle class="dial-track-arc" cx="40" cy="40" r="28"/>
+              <circle class="dial-fill-arc"  id="dial-fill" cx="40" cy="40" r="28"/>
+              <circle cx="40" cy="40" r="14" class="dial-knob"/>
+              <circle id="dial-dot" cx="40" cy="14" r="3.5" class="dial-dot"/>
+            </svg>
+            <div class="dial-info">
+              <span class="dial-val" id="speed-val">1.0×</span>
+              <span class="dial-hint">drag · scroll</span>
+            </div>
+          </div>
         </div>
       </div>
 

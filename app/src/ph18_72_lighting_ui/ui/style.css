@@ -397,6 +397,62 @@ body {
   box-shadow: 0 0 10px rgba(255,60,80,0.25);
 }
 
+/* ── Speed dial ────────────────────────────────────────────────────── */
+/* Track: 270° arc, r=28, circ=175.93. Arc len=131.95. dashoffset=65.97
+   shifts start clockwise 135° from SVG default (3 o'clock) → 7:30 pos. */
+.dial-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.speed-dial {
+  width: 68px;
+  height: 68px;
+  cursor: grab;
+  flex-shrink: 0;
+}
+.speed-dial:active { cursor: grabbing; }
+.dial-track-arc {
+  fill: none;
+  stroke: var(--bg-card);
+  stroke-width: 7;
+  stroke-dasharray: 131.95 175.93;
+  stroke-dashoffset: 65.97;
+  stroke-linecap: round;
+}
+.dial-fill-arc {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 7;
+  stroke-dasharray: 0 175.93;
+  stroke-dashoffset: 65.97;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px var(--accent-glow));
+}
+.dial-knob {
+  fill: var(--bg-panel);
+  stroke: var(--border-mid);
+  stroke-width: 1;
+}
+.dial-dot { fill: var(--text); }
+.dial-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dial-val {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text);
+  line-height: 1;
+}
+.dial-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
 /* ── WASD SVG ──────────────────────────────────────────────────────── */
 .magkey-main {
   align-items: center;

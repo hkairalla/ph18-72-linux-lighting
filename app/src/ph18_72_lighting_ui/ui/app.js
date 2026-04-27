@@ -117,7 +117,9 @@ const state = {
   emitterColors: Array.from({length:12}, () => [0,0,0]),
   animRunning: false,
   animMode: 'wheel',
-  animStart: null,
+  animTime: 0,
+  animLastTs: null,
+  animSpeed: 1.0,
   hidBusy: false,
   lastHidMs: 0,
 };
@@ -153,13 +155,23 @@ async function runDaemon(args) {
   return result;
 }
 
+/* ── MagKey frame send (always sends full 12-emitter state) ──────────*/
+function sendMagkeyFrame(label) {
+  setStatus(label, 'busy');
+  api.send_magkey_frame(state.emitterColors).then(result => {
+    const ok = result === 'ok';
+    setStatus(label + (ok ? ' — ok' : ' — ' + result), ok ? 'ok' : 'err');
+    pushHistory({ ok, title: label, output: ok ? 'frame sent' : result });
+  });
+}
+
 /* ── MagKey helpers ──────────────────────────────────────────────────*/
 function mkAllNamed(colorName) {
   const map = {off:[0,0,0], red:[255,0,0], green:[0,255,0], blue:[0,0,255]};
   const [r,g,b] = map[colorName] || [0,0,0];
   state.emitterColors = Array.from({length:12}, () => [r,g,b]);
   updateAllEmitterSvg();
-  runDaemon(['set-magkeys-whole', '--color', colorName]);
+  sendMagkeyFrame(colorName);
 }
 
 /* ── SVG emitter color update ────────────────────────────────────────*/
@@ -177,8 +189,11 @@ function updateAllEmitterSvg() {
 /* ── Animation loop ──────────────────────────────────────────────────*/
 function animLoop(ts) {
   if (!state.animRunning) return;
-  if (!state.animStart) state.animStart = ts;
-  const t = (ts - state.animStart) / 1000;
+  if (!state.animLastTs) state.animLastTs = ts;
+  const dt = (ts - state.animLastTs) / 1000;
+  state.animLastTs = ts;
+  state.animTime += dt * state.animSpeed;
+  const t = state.animTime;
 
   const fn = MODES[state.animMode];
   if (!fn) return;
@@ -199,9 +214,10 @@ function animLoop(ts) {
 }
 
 function startAnim(mode) {
-  state.animMode   = mode;
+  state.animMode    = mode;
   state.animRunning = true;
-  state.animStart  = null;
+  state.animTime    = 0;
+  state.animLastTs  = null;
   const btn = document.getElementById('btn-anim');
   btn.textContent = '■ Stop';
   btn.classList.add('running');
@@ -210,13 +226,13 @@ function startAnim(mode) {
 
 function stopAnim() {
   state.animRunning = false;
-  state.animStart   = null;
+  state.animLastTs  = null;
   const btn = document.getElementById('btn-anim');
   btn.textContent = '▶ Start';
   btn.classList.remove('running');
-  // Send all-off
-  api.send_magkey_frame(Array.from({length:12}, () => [0,0,0]));
-  state.emitterColors.forEach((_,i) => setEmitterSvg(i, 0, 0, 0));
+  state.emitterColors = Array.from({length:12}, () => [0,0,0]);
+  updateAllEmitterSvg();
+  api.send_magkey_frame(state.emitterColors);
 }
 
 /* ── Slider helpers ──────────────────────────────────────────────────*/
@@ -310,7 +326,7 @@ function initMagkeyPanel() {
 
   wireSliders('mk-r', 'mk-g', 'mk-b', 'mk-swatch');
 
-  // Apply zone
+  // Apply zone — updates one emitter, sends full 12-emitter frame so other keys stay lit
   document.getElementById('btn-mk-apply-zone').addEventListener('click', () => {
     if (state.mkEmitter === null) return;
     const r = +document.getElementById('mk-r').value;
@@ -318,21 +334,10 @@ function initMagkeyPanel() {
     const b = +document.getElementById('mk-b').value;
     state.emitterColors[state.mkEmitter] = [r,g,b];
     setEmitterSvg(state.mkEmitter, r, g, b);
-    // Build zones for the key
-    const m = EMITTER_META[state.mkEmitter];
-    const base = {'w':0,'a':3,'s':6,'d':9}[m.key];
-    const [lr,lg,lb] = state.emitterColors[base];
-    const [tr,tg,tb] = state.emitterColors[base+1];
-    const [rr,rg,rb] = state.emitterColors[base+2];
-    runDaemon([
-      'set-magkey-zones', '--key', m.key,
-      '--left',  `${lr},${lg},${lb}`,
-      '--top',   `${tr},${tg},${tb}`,
-      '--right', `${rr},${rg},${rb}`,
-    ]);
+    sendMagkeyFrame('zone');
   });
 
-  // Apply whole key — set all 3 zones of the selected key to the slider color
+  // Apply whole key
   document.getElementById('btn-mk-apply-key').addEventListener('click', () => {
     if (state.mkEmitter === null) return;
     const r = +document.getElementById('mk-r').value;
@@ -340,9 +345,11 @@ function initMagkeyPanel() {
     const b = +document.getElementById('mk-b').value;
     const m = EMITTER_META[state.mkEmitter];
     const base = {'w':0,'a':3,'s':6,'d':9}[m.key];
-    state.emitterColors[base] = state.emitterColors[base+1] = state.emitterColors[base+2] = [r,g,b];
+    state.emitterColors[base] = [r,g,b];
+    state.emitterColors[base+1] = [r,g,b];
+    state.emitterColors[base+2] = [r,g,b];
     updateAllEmitterSvg();
-    runDaemon(['set-magkey-key', '--key', m.key, '--red', r, '--green', g, '--blue', b]);
+    sendMagkeyFrame('key-' + m.key);
   });
 
   // Apply all keys
@@ -352,7 +359,7 @@ function initMagkeyPanel() {
     const b = +document.getElementById('mk-b').value;
     state.emitterColors = Array.from({length:12}, () => [r,g,b]);
     updateAllEmitterSvg();
-    runDaemon(['set-magkeys', '--all', `${r},${g},${b}`]);
+    sendMagkeyFrame('all-keys');
   });
 
   // Animation
@@ -444,6 +451,62 @@ function initHistory() {
   });
 }
 
+/* ── Speed dial ──────────────────────────────────────────────────────*/
+function initSpeedDial() {
+  const MIN = 0.1, MAX = 4.0;
+  const START_DEG = 225, SWEEP_DEG = 270;
+  const R = 28, CIRC = 2 * Math.PI * R;
+  const ARC_LEN = CIRC * SWEEP_DEG / 360;
+  const CX = 40, CY = 40, DOT_R = 26;
+
+  const svg    = document.getElementById('speed-dial');
+  const fillEl = document.getElementById('dial-fill');
+  const dotEl  = document.getElementById('dial-dot');
+  const valEl  = document.getElementById('speed-val');
+
+  function setSpeed(speed) {
+    speed = Math.max(MIN, Math.min(MAX, speed));
+    state.animSpeed = speed;
+    const t = (speed - MIN) / (MAX - MIN);
+    fillEl.setAttribute('stroke-dasharray', `${(t * ARC_LEN).toFixed(2)} ${CIRC.toFixed(2)}`);
+    const angleDeg = START_DEG + t * SWEEP_DEG;
+    const rad = (angleDeg - 90) * Math.PI / 180;
+    dotEl.setAttribute('cx', (CX + DOT_R * Math.cos(rad)).toFixed(1));
+    dotEl.setAttribute('cy', (CY + DOT_R * Math.sin(rad)).toFixed(1));
+    valEl.textContent = speed.toFixed(1) + '×';
+  }
+
+  function svgAngle(clientX, clientY) {
+    const rect = svg.getBoundingClientRect();
+    const mx = clientX - rect.left - rect.width / 2;
+    const my = clientY - rect.top - rect.height / 2;
+    let deg = Math.atan2(mx, -my) * 180 / Math.PI;
+    if (deg < 0) deg += 360;
+    return deg;
+  }
+
+  let dragging = false, lastAngle = null;
+  svg.addEventListener('mousedown', e => {
+    dragging = true; lastAngle = svgAngle(e.clientX, e.clientY); e.preventDefault();
+  });
+  window.addEventListener('mouseup', () => { dragging = false; lastAngle = null; });
+  window.addEventListener('mousemove', e => {
+    if (!dragging || lastAngle === null) return;
+    const angle = svgAngle(e.clientX, e.clientY);
+    let delta = angle - lastAngle;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    lastAngle = angle;
+    setSpeed(state.animSpeed + delta / SWEEP_DEG * (MAX - MIN));
+  });
+  svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    setSpeed(state.animSpeed - e.deltaY * 0.004);
+  }, { passive: false });
+
+  setSpeed(1.0);
+}
+
 /* ── Backend badge ───────────────────────────────────────────────────*/
 async function initBackend() {
   try {
@@ -465,6 +528,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initKeyboardPanel();
   initMagkeyPanel();
   initCoverPanel();
+  initSpeedDial();
   setStatus('Ready');
   // pywebviewready fires once the Python API is injected; re-run badge check then.
   // Also call immediately for browser dev mode where there is no pywebview.
