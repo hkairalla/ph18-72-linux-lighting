@@ -9,6 +9,8 @@ import sys
 import threading
 from pathlib import Path
 
+os.environ.setdefault("PYWEBVIEW_GUI", "qt")
+
 import webview
 
 APP_DIR  = Path(__file__).resolve().parent
