@@ -52,15 +52,21 @@
             </div>
           </div>
           <div class="color-swatch" id="kb-swatch"></div>
-          <button class="btn-primary" id="btn-kb-apply">Apply Key</button>
-          <div class="sidebar-note">Press a key or click to select. All standard keys enabled.</div>
-          <div class="divider"></div>
-          <div class="section-label">Whole keyboard</div>
           <div class="btn-row">
-            <button class="btn-preset blue-btn"  onclick="runDaemon(['set-main-keyboard-blue'])">Blue</button>
-            <button class="btn-preset red-btn"   onclick="runDaemon(['set-main-keyboard-red'])">Red</button>
-            <button class="btn-preset green-btn" onclick="runDaemon(['set-main-keyboard-green'])">Green</button>
+            <button class="btn-primary" id="btn-kb-apply">Apply Key</button>
+            <button class="btn-secondary" id="btn-kb-clear">Clear Key</button>
           </div>
+          <div class="sidebar-note">WASD are MagKeys — use the MagKey panel.</div>
+          <div class="divider"></div>
+          <div class="section-label">Baseline (whole board)</div>
+          <div class="btn-row">
+            <button class="btn-preset"           data-baseline="off">Off</button>
+            <button class="btn-preset blue-btn"  data-baseline="blue">Blue</button>
+            <button class="btn-preset red-btn"   data-baseline="red">Red</button>
+            <button class="btn-preset green-btn" data-baseline="green">Green</button>
+          </div>
+          <div class="sidebar-note">Changing baseline clears per-key overrides.</div>
+          <button class="btn-secondary" id="btn-kb-reset" style="margin-top:8px;">Reset Overrides</button>
         </div>
       </div>
 

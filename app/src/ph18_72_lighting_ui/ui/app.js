@@ -20,44 +20,61 @@ const api = (() => {
   });
 })();
 
-/* ── Keyboard layout ─────────────────────────────────────────────────*/
+/* ── Keyboard layout ─────────────────────────────────────────────────
+   Each entry in a row is either:
+     - [label, daemon-name]                          normal key, width 1
+     - [label, daemon-name, { w: 1.5 }]              wide key
+     - [label, daemon-name, { kind: 'magkey' }]      WASD MagKey marker (disabled)
+     - 'gap'                                         visual separator
+     - null                                          empty slot (preserves position)
+   Daemon-name MUST match one of the names in keyboard_key_index in main.rs.
+   WASD are intentionally inert here — they live in the MagKey panel.
+*/
 const KB_ROWS = [
-  // F-keys
+  // F-row: Esc, F1-F12, Prnt/Ins/Del, gap, media+power
   [['Esc','esc'],['F1','f1'],['F2','f2'],['F3','f3'],['F4','f4'],['F5','f5'],['F6','f6'],
    ['F7','f7'],['F8','f8'],['F9','f9'],['F10','f10'],['F11','f11'],['F12','f12'],
-   ['Prnt','print_screen'],['Ins','insert'],['Del','delete']],
+   ['Prnt','print_screen'],['Ins','insert'],['Del','delete'],
+   'gap',
+   ['◀◀','media_prev'],['▶∥','media_play_pause'],['▶▶','media_next'],['⏻','power']],
 
-  // Numbers + modifiers
+  // Number row, then Bksp (2x), gap, numpad top
   [['`','grave'],['1','1'],['2','2'],['3','3'],['4','4'],['5','5'],['6','6'],
-   ['7','7'],['8','8'],['9','9'],['0','0'],['-','minus'],['=','equal'],['Bksp','backspace']],
+   ['7','7'],['8','8'],['9','9'],['0','0'],['-','minus'],['=','equal'],
+   ['Bksp','backspace',{w:2}],
+   'gap',
+   ['PS','predator_sense'],['NL','keypad_num_lock'],['/','keypad_divide'],['*','keypad_multiply']],
 
-  // QWERTY
-  [['Tab','tab'],['Q','q'],['W','w'],['E','e'],['R','r'],['T','t'],['Y','y'],
-   ['U','u'],['I','i'],['O','o'],['P','p'],['[','left_bracket'],[']','right_bracket'],['\\','backslash']],
+  // QWERTY: Tab (1.5x), Q W(MagKey) E ..., numpad 7-9, kp-minus
+  [['Tab','tab',{w:1.5}],['Q','q'],['W','w',{kind:'magkey'}],['E','e'],['R','r'],['T','t'],['Y','y'],
+   ['U','u'],['I','i'],['O','o'],['P','p'],['[','left_bracket'],[']','right_bracket'],['\\','backslash'],
+   'gap',
+   ['7','keypad_7'],['8','keypad_8'],['9','keypad_9'],['-','keypad_minus']],
 
-  // Home row
-  [['Caps','caps_lock'],['A','a'],['S','s'],['D','d'],['F','f'],['G','g'],['H','h'],
-   ['J','j'],['K','k'],['L','l'],[';','semicolon'],['"','apostrophe'],['Enter','enter']],
+  // Home row: Caps (1.75x), A(MK) S(MK) D(MK) F..., Enter (2.25x), numpad 4-6 + plus
+  [['Caps','caps_lock',{w:1.75}],
+   ['A','a',{kind:'magkey'}],['S','s',{kind:'magkey'}],['D','d',{kind:'magkey'}],
+   ['F','f'],['G','g'],['H','h'],['J','j'],['K','k'],['L','l'],
+   [';','semicolon'],['"','apostrophe'],['Enter','enter',{w:2.25}],
+   'gap',
+   ['4','keypad_4'],['5','keypad_5'],['6','keypad_6'],['+','keypad_plus']],
 
-  // Bottom row
-  [['Shift','left_shift'],['Z','z'],['X','x'],['C','c'],['V','v'],['B','b'],['N','n'],
-   ['M','m'],[',','comma'],['.','period'],['/','slash'],['RShift','right_shift']],
+  // Bottom row: LShift (2.25x), letters, arrow_up inline at right, then numpad 1-3
+  [['Shift','left_shift',{w:2.25}],['Z','z'],['X','x'],['C','c'],['V','v'],['B','b'],['N','n'],
+   ['M','m'],[',','comma'],['.','period'],['/','slash'],
+   ['RShift','right_shift',{w:1.75}],
+   ['↑','arrow_up'],
+   'gap',
+   ['1','keypad_1'],['2','keypad_2'],['3','keypad_3'],['Cpilot','copilot']],
 
-  // Spacebar + arrows
-  [['Ctrl','left_ctrl'],['Win','left_windows'],['Alt','left_alt'],['Space','space'],
-   ['RAlt','right_alt'],['Fn','fn'],['Menu','menu'],['Ctrl','right_ctrl']],
-
-  // Arrow cluster
-  [['',''],['↑','arrow_up'],['','']],
-  [['←','arrow_left'],['↓','arrow_down'],['→','arrow_right']],
+  // Spacebar row: Ctrl, Fn, Win, Alt, Space (6.25x), Alt, Menu, arrows, numpad 0/./Enter
+  [['Ctrl','left_ctrl',{w:1.25}],['Fn','fn'],['Win','left_windows'],['Alt','left_alt',{w:1.25}],
+   ['Space','space',{w:6.25}],
+   ['Alt','right_alt',{w:1.25}],['Menu','menu'],
+   ['←','arrow_left'],['↓','arrow_down'],['→','arrow_right'],
+   'gap',
+   ['0','keypad_0',{w:2}],['.','keypad_decimal'],['Ent','keypad_enter']],
 ];
-const KB_ENABLED = new Set(['esc','f1','f2','f3','f4','f5','f6','f7','f8','f9','f10','f11','f12',
-  'print_screen','insert','delete','grave','1','2','3','4','5','6','7','8','9','0','minus','equal','backspace',
-  'tab','q','w','e','r','t','y','u','i','o','p','left_bracket','right_bracket','backslash',
-  'caps_lock','a','s','d','f','g','h','j','k','l','semicolon','apostrophe','enter',
-  'left_shift','z','x','c','v','b','n','m','comma','period','slash','right_shift',
-  'left_ctrl','left_windows','left_alt','space','right_alt','fn','menu','right_ctrl',
-  'arrow_up','arrow_down','arrow_left','arrow_right']);
 
 /* ── MagKey emitter spatial data ─────────────────────────────────────
    Real 2D coordinates derived from hardware photo (2026-04-26).
@@ -291,18 +308,40 @@ function initKeyboardPanel() {
   KB_ROWS.forEach(row => {
     const rowEl = document.createElement('div');
     rowEl.className = 'kb-row';
-    row.forEach(([label, name]) => {
+    row.forEach(entry => {
+      if (entry === 'gap') {
+        const gap = document.createElement('div');
+        gap.className = 'kb-gap';
+        rowEl.appendChild(gap);
+        return;
+      }
+      if (entry === null) {
+        const spacer = document.createElement('div');
+        spacer.className = 'kb-key kb-spacer';
+        rowEl.appendChild(spacer);
+        return;
+      }
+      const [label, name, opts = {}] = entry;
       const btn = document.createElement('button');
-      btn.className = 'kb-key' + (KB_ENABLED.has(name) ? '' : ' disabled');
+      const isMagkey = opts.kind === 'magkey';
+      btn.className = 'kb-key' + (isMagkey ? ' kb-magkey' : '');
       btn.textContent = label;
       btn.dataset.name = name;
-      btn.addEventListener('click', () => {
-        if (!KB_ENABLED.has(name)) return;
-        document.querySelectorAll('.kb-key').forEach(k => k.classList.remove('selected'));
-        btn.classList.add('selected');
-        state.kbKey = name;
-        document.getElementById('kb-selected-label').textContent = label;
-      });
+      if (opts.w) {
+        // Track widths are units of the base key width (~36px) including the inter-key gap.
+        btn.style.flex = `${opts.w} 0 calc(var(--kb-unit) * ${opts.w} + (${opts.w} - 1) * var(--kb-gap))`;
+      }
+      if (isMagkey) {
+        btn.title = 'MagKey — use the MagKey 3.0 panel';
+        btn.tabIndex = -1;
+      } else {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.kb-key').forEach(k => k.classList.remove('selected'));
+          btn.classList.add('selected');
+          state.kbKey = name;
+          document.getElementById('kb-selected-label').textContent = label;
+        });
+      }
       rowEl.appendChild(btn);
     });
     grid.appendChild(rowEl);
@@ -314,6 +353,21 @@ function initKeyboardPanel() {
     if (!state.kbKey) return;
     const [r,g,b] = getKbRgb();
     runDaemon(['set-keyboard-key', '--key', state.kbKey, '--red', r, '--green', g, '--blue', b]);
+  });
+
+  document.getElementById('btn-kb-clear').addEventListener('click', () => {
+    if (!state.kbKey) return;
+    runDaemon(['clear-keyboard-key', '--key', state.kbKey]);
+  });
+
+  document.getElementById('btn-kb-reset').addEventListener('click', () => {
+    runDaemon(['reset-keyboard']);
+  });
+
+  document.querySelectorAll('[data-baseline]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      runDaemon(['set-keyboard-baseline', '--color', btn.dataset.baseline]);
+    });
   });
 }
 

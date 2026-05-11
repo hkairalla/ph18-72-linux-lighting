@@ -526,18 +526,20 @@ body {
   padding: 16px;
 }
 .keyboard-grid {
+  --kb-unit: 32px;
+  --kb-gap: 4px;
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
 .kb-row {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  gap: var(--kb-gap);
 }
 .kb-key {
-  min-width: 34px;
-  height: 32px;
+  flex: 1 0 var(--kb-unit);
+  min-width: var(--kb-unit);
+  height: var(--kb-unit);
   padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -555,6 +557,24 @@ body {
 .kb-key:hover { border-color: var(--border-mid); color: var(--text); background: var(--bg-hover); }
 .kb-key.selected { border-color: var(--accent); background: var(--bg-selected); color: var(--text); }
 .kb-key.disabled { opacity: 0.35; cursor: not-allowed; }
+.kb-key.kb-magkey {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.kb-key.kb-magkey:hover {
+  /* Override the generic hover so MagKey buttons stay visually inert. */
+  border-color: var(--border);
+  color: var(--text-dim);
+  background: var(--bg-card);
+}
+.kb-spacer {
+  visibility: hidden;
+  pointer-events: none;
+}
+.kb-gap {
+  flex: 0 0 12px;
+}
 
 /* ── Cover logo ────────────────────────────────────────────────────── */
 .cover-main { align-items: center; }
