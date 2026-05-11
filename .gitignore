@@ -27,3 +27,6 @@ target/
 .claude/settings.local.json
 .vscode/
 .idea/
+
+# Local scratch / handoff files (not part of the product)
+scratch/
