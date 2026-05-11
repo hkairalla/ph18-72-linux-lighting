@@ -17,7 +17,7 @@ reverse-engineering scratchwork lives under git-ignored `testing/`.
 
 - MagKey RGB (whole / pattern / per-key / per-zone).
 - Cover Logo (whole + left/middle/right segments + brightness).
-- Main keyboard whole-board color: baseline = off / blue / red / green.
+- Main keyboard whole-board color: any 24-bit RGB baseline (named presets `off`/`blue`/`red`/`green` are aliases).
 - Per-key keyboard colors (with the state-aware repaint model below).
 
 ## Per-key keyboard model
@@ -34,8 +34,7 @@ The daemon persists `{baseline, overrides}` in
 changes stack across separate commands.
 
 See [docs/PROTOCOL_NOTES.md](docs/PROTOCOL_NOTES.md) for the deeper firmware
-quirks (`report82/84/86` semantics, ff02 commit33 word table, stubborn
-indices).
+quirks (`report82/84/86` semantics, ff02 commit33 word table).
 
 ## Conventions
 
@@ -43,11 +42,10 @@ indices).
   commands. Don't introduce new packet bytes in JS/Python.
 - Don't commit anything under `testing/`. It's git-ignored and contains
   imported research scripts and captures.
-- When adding a new keyboard CLI command, route it through the
-  `repaint_keyboard(state)` helper so accumulated state stays consistent.
-- The four "stubborn" indices `[25, 66, 71, 98]` need an explicit `report84`
-  follow-up after every ff02 anchor; the daemon handles this — don't
-  bypass it.
+- When adding a new keyboard CLI command, decide first whether it needs a
+  full ff02 anchor or whether the fast path (single `report84`+`report86=1`
+  per key) is enough. Mutating a single key is fast-path; baseline /
+  reset / repaint are full anchor.
 
 ## Open work
 
@@ -60,8 +58,9 @@ indices).
   or remove from the UI.
 - Base Logo and Infinity Mirror surfaces are still unsolved; HID captures
   inconclusive, WMI/ACPI not yet explored.
-- ff02 commit33 only has known-working words for `{off, blue, red, green}`.
-  No general RGB→word formula yet.
+- ff02 anchor (used by baseline / reset / repaint) is still ~6 sec on this
+  hardware. The slowness is the 20 passes × 8 banks in `run_ff02_anchor`;
+  fewer may suffice now that the encoding is correct. Untested.
 
 ## Hardware quick reference
 

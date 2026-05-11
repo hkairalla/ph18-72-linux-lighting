@@ -22,7 +22,7 @@ PyWebView UI (HTML/CSS/JS in app/src/ph18_72_lighting_ui/ui/)
 
 The UI requests semantic operations through daemon CLI commands:
 
-- `set-keyboard-baseline --color {off,blue,red,green}`
+- `set-keyboard-baseline --color {off|blue|red|green|R,G,B}`
 - `set-keyboard-key --key K --red R --green G --blue B`
 - `clear-keyboard-key --key K`
 - `reset-keyboard`
@@ -46,14 +46,21 @@ override=39:255,0,0
 override=41:0,255,0
 ```
 
-Every keyboard command performs a full-board repaint:
+Keyboard commands split into two paths:
 
-1. ff02 commit33 sweep with the current baseline word.
-2. `report82` + `report86=1` to anchor the baseline RGB on stubborn cells.
-3. `report84` + `report86=1` for each per-key override.
+- **Baseline / reset / repaint** runs a full-board repaint: ff02 commit33
+  sweep with the current baseline word, then `report84`+`report86=1` for
+  each per-key override.
+- **`set-keyboard-key` and `clear-keyboard-key`** are fast-path: a single
+  `report84`+`report86=1` for the target key. No ff02 anchor. They assume
+  the firmware is already in a static frame (set by an earlier baseline
+  command this session). If the firmware drifted back to dynamic, the
+  write is silently absorbed; recovery is any baseline / repaint command.
 
-This is required because per-key writes are inert against the firmware's
-default dynamic mode. See [PROTOCOL_NOTES.md](PROTOCOL_NOTES.md).
+The ff02 anchor is needed because per-key writes are inert against the
+firmware's default dynamic animation; only the ff02 commit33 sweep flips
+the firmware into a static frame. See
+[PROTOCOL_NOTES.md](PROTOCOL_NOTES.md).
 
 ## Controller Triage
 

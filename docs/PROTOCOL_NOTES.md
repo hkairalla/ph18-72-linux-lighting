@@ -24,42 +24,62 @@ roles:
 
 ### Confirmed ff02 commit33 words
 
-The 4-byte word inside the 64-byte ff02 frame is not a conventional RGB
-encoding. Known-working words on this unit:
+The 4-byte word inside the 64-byte ff02 frame is a conventional 24-bit RGB
+encoding with a routing flag:
 
-| Visible color | Word |
-| --- | --- |
-| Blue | `ff 00 00 ff` |
-| Red-ish | `00 00 ff 00` |
-| Green | `00 00 00 ff` |
-| Off | `00 00 00 00` |
+```
+word = [ 0xff, R, G, B ]
+       └── broadcast mode: reaches all 102 main-keyboard indices
+```
 
-`set-keyboard-baseline --color {off,blue,red,green}` exposes these. Arbitrary
-RGB baselines via the ff02 path are not understood.
+`set-keyboard-baseline --color X` accepts either a named preset
+(`off` / `blue` / `red` / `green`) or any `R,G,B` triple, e.g.
+`--color 255,128,0` for orange. The daemon builds the word as
+`[0xff, R, G, B]`.
+
+#### Discovery (2026-05-11)
+
+The earlier protocol notes here listed four "known-working" words derived
+empirically from packet captures:
+
+| Visible | Word | Status |
+| --- | --- | --- |
+| Blue | `ff 00 00 ff` | ✓ all 102 keys (coincidentally broadcast — byte 0 = 0xff) |
+| "Red-ish" | `00 00 ff 00` | ✗ legacy mode, only ~98 keys respond |
+| "Green" | `00 00 00 ff` | ✗ legacy mode, only ~98 keys respond |
+| Off | `00 00 00 00` | ✗ legacy mode, only ~98 keys respond |
+
+This is why the previous code had a "stubborn-keys" patch (indices 25,
+66, 71, 98) — those four keys retained the previous baseline's color
+through any non-broadcast write, producing visible artifacts (e.g.
+purple cells when changing blue → "red"). The patch worked around the
+symptom, not the cause.
+
+A four-probe `probe-keyboard-word` session against this unit unlocked
+the real encoding:
+
+| Probe | Word | Result |
+| --- | --- | --- |
+| 1 | `ff 00 ff 00` | All 102 keys → green |
+| 2 | `ff 00 ff ff` | All 102 keys → cyan (green + blue) |
+| 3 | `ff ff 00 00` | All 102 keys → red |
+
+That established: byte 0 = 0xff is a broadcast flag; bytes 1/2/3 are
+plain 8-bit R/G/B channels. The patch is now removed and the daemon
+supports arbitrary 24-bit RGB baselines.
 
 ### Probing new ff02 words
 
 The daemon exposes a `probe-keyboard-word` command that runs an ff02 commit33
 sweep with an arbitrary 4-byte word and **does not touch persistent state**,
-so you can sweep freely:
+so you can sweep freely without disturbing the saved baseline / overrides:
 
 ```bash
-ph18-lighting-daemon probe-keyboard-word --word ff:00:00:ff   # known blue
-ph18-lighting-daemon probe-keyboard-word --word 00:ff:00:00   # unknown
+ph18-lighting-daemon probe-keyboard-word --word ff:80:40:20
+# decoded=broadcast R=128 G=64 B=32 (all 102 keys)
 ```
 
-A sensible byte-by-byte sweep to start mapping the encoding:
-
-```bash
-for v in 00 40 80 c0 ff; do
-  echo "byte0=$v"
-  ph18-lighting-daemon probe-keyboard-word --word "${v}:00:00:00"
-  read -p '  visible color? ' obs
-done
-```
-
-Repeat per byte position, recording what you observe. Restore your normal
-state afterwards with `repaint-keyboard`.
+Restore your normal state afterwards with `repaint-keyboard`.
 
 ### `report86` semantics (from research probes)
 
@@ -71,20 +91,6 @@ state afterwards with `repaint-keyboard`.
 
 The daemon never sends `[0x86, 0x00]` in the per-key write loop; doing so was
 the original bug that made per-key writes appear to revert to dynamic.
-
-### Stubborn indices
-
-After an ff02 commit33 sweep, four indices on this unit do not pick up the
-baseline color cleanly and need an explicit `report84` follow-up at the
-baseline RGB:
-
-- 25 (digit 5)
-- 66 (semicolon)
-- 71 (keypad 6)
-- 98 (arrow down)
-
-The daemon repaints these every time it runs a full repaint, unless the user
-has explicitly overridden them.
 
 ## MagKey 3.0
 

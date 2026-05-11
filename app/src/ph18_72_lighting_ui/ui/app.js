@@ -381,7 +381,17 @@ function wireSliders(rId, gId, bId, swatchId, onChange) {
 
 /* ── Keyboard panel init ─────────────────────────────────────────────*/
 function initKeyboardPanel() {
+  try {
+    _initKeyboardPanelBody();
+  } catch (err) {
+    console.error('initKeyboardPanel failed:', err);
+    setStatus('keyboard init failed: ' + (err && err.message || err), 'err');
+  }
+}
+
+function _initKeyboardPanelBody() {
   const grid = document.getElementById('keyboard-grid');
+  if (!grid) throw new Error('#keyboard-grid not in DOM');
   KEYS.forEach(k => {
     const btn = document.createElement('button');
     const isMagkey = k.kind === 'magkey';
@@ -405,28 +415,71 @@ function initKeyboardPanel() {
     grid.appendChild(btn);
   });
 
-  const getKbRgb = wireSliders('kb-r', 'kb-g', 'kb-b', 'kb-swatch');
-
-  document.getElementById('btn-kb-apply').addEventListener('click', () => {
+  // Live slider preview: as the user drags R/G/B sliders, push the new
+  // color to the selected key at most every 100 ms. Per-key writes are
+  // ~50 ms each on the fast path, so 10 Hz keeps the UI responsive
+  // without saturating the daemon process spawn.
+  let liveTimer = null;
+  let livePending = null;
+  const SLIDER_THROTTLE_MS = 100;
+  function liveApply(r, g, b) {
     if (!state.kbKey) return;
+    livePending = [r, g, b];
+    if (liveTimer) return;
+    liveTimer = setTimeout(() => {
+      const [pr, pg, pb] = livePending;
+      livePending = null;
+      liveTimer = null;
+      if (state.kbKey) {
+        runDaemon(['set-keyboard-key', '--key', state.kbKey, '--red', pr, '--green', pg, '--blue', pb]);
+      }
+    }, SLIDER_THROTTLE_MS);
+  }
+
+  let sliderInit = true;
+  const getKbRgb = wireSliders('kb-r', 'kb-g', 'kb-b', 'kb-swatch', (r, g, b) => {
+    // wireSliders fires update() once on init to seed the swatch; skip
+    // that synthetic call so the daemon isn't pinged on UI startup.
+    if (sliderInit) { sliderInit = false; return; }
+    liveApply(r, g, b);
+  });
+
+  const wireBtn = (id, handler) => {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`#${id} not in DOM`);
+    el.addEventListener('click', handler);
+  };
+
+  wireBtn('btn-kb-apply', () => {
+    if (!state.kbKey) {
+      setStatus('pick a key first', 'err');
+      return;
+    }
     const [r,g,b] = getKbRgb();
     runDaemon(['set-keyboard-key', '--key', state.kbKey, '--red', r, '--green', g, '--blue', b]);
   });
 
-  document.getElementById('btn-kb-clear').addEventListener('click', () => {
-    if (!state.kbKey) return;
+  wireBtn('btn-kb-clear', () => {
+    if (!state.kbKey) {
+      setStatus('pick a key first', 'err');
+      return;
+    }
     runDaemon(['clear-keyboard-key', '--key', state.kbKey]);
   });
 
-  document.getElementById('btn-kb-reset').addEventListener('click', () => {
+  wireBtn('btn-kb-reset', () => {
     runDaemon(['reset-keyboard']);
   });
 
-  document.querySelectorAll('[data-baseline]').forEach(btn => {
+  const baselineBtns = document.querySelectorAll('[data-baseline]');
+  if (baselineBtns.length === 0) throw new Error('no [data-baseline] buttons in DOM');
+  baselineBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       runDaemon(['set-keyboard-baseline', '--color', btn.dataset.baseline]);
     });
   });
+
+  setStatus(`keyboard panel ready (${KEYS.length} keys, ${baselineBtns.length} baselines)`);
 }
 
 /* ── MagKey panel init ───────────────────────────────────────────────*/

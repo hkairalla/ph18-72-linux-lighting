@@ -24,7 +24,7 @@ protocol summary.
 | --- | --- | --- |
 | MagKey 3.0 / WASD overlay | Confirmed | HID `05af:866a` ff02 LED-map |
 | Cover Logo (whole + segments + brightness) | Confirmed | HID `0d62:ba51` |
-| Main keyboard whole-board color | Confirmed for `off` / `blue` / `red` / `green` | HID `05af:866a` ff02 commit33 |
+| Main keyboard whole-board color | Confirmed for any 24-bit RGB | HID `05af:866a` ff02 commit33 (broadcast mode) |
 | Main keyboard per-key colors | Confirmed (anchored to a baseline) | HID `05af:866a` ff02 anchor + `report84` per-key |
 | Base Logo | Unknown | HID inconclusive; WMI/ACPI may help |
 | Infinity Mirror | Unknown | HID inconclusive; WMI/ACPI may help |
@@ -35,11 +35,18 @@ See [docs/HARDWARE_STATUS.md](docs/HARDWARE_STATUS.md) for the full table.
 
 Per-key `report84` writes are inert against the firmware's default dynamic
 animation; only the ff02 commit33 sweep flips the firmware into a static
-frame. The daemon therefore keeps a small persistent state file
-(`~/.cache/ph18-lighting/keyboard-state`) with a baseline color and a map of
-per-key overrides, and re-emits the full board (anchor + overrides) on every
-change. Setting Q red then E green leaves both as expected; clearing Q
-returns Q to the baseline.
+frame. The daemon keeps a persistent state file
+(`~/.cache/ph18-lighting/keyboard-state`) with a 24-bit RGB baseline and a
+map of per-key overrides. Baseline / reset / repaint commands do a full
+ff02 anchor (~6 sec). Per-key `set-keyboard-key` / `clear-keyboard-key`
+take a fast path (a single `report84`+`report86=0x01`, ~50 ms) and assume
+the firmware is already anchored from an earlier baseline this session.
+Setting Q red then E green leaves both as expected; clearing Q returns Q
+to the baseline.
+
+The ff02 word encoding is `[0xff, R, G, B]` — byte 0 = `0xff` is a
+broadcast flag that reaches all 102 keyboard indices. See
+[docs/PROTOCOL_NOTES.md](docs/PROTOCOL_NOTES.md) for the discovery.
 
 ## Development
 
@@ -127,6 +134,7 @@ ph18-lighting-daemon inventory
 
 # Whole-board baseline (also clears per-key overrides)
 ph18-lighting-daemon set-keyboard-baseline --color blue
+ph18-lighting-daemon set-keyboard-baseline --color 255,128,0   # arbitrary RGB
 ph18-lighting-daemon set-main-keyboard-blue   # alias
 
 # Per-key overrides (stacks across calls)
