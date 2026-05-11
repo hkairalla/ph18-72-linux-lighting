@@ -37,6 +37,30 @@ encoding. Known-working words on this unit:
 `set-keyboard-baseline --color {off,blue,red,green}` exposes these. Arbitrary
 RGB baselines via the ff02 path are not understood.
 
+### Probing new ff02 words
+
+The daemon exposes a `probe-keyboard-word` command that runs an ff02 commit33
+sweep with an arbitrary 4-byte word and **does not touch persistent state**,
+so you can sweep freely:
+
+```bash
+ph18-lighting-daemon probe-keyboard-word --word ff:00:00:ff   # known blue
+ph18-lighting-daemon probe-keyboard-word --word 00:ff:00:00   # unknown
+```
+
+A sensible byte-by-byte sweep to start mapping the encoding:
+
+```bash
+for v in 00 40 80 c0 ff; do
+  echo "byte0=$v"
+  ph18-lighting-daemon probe-keyboard-word --word "${v}:00:00:00"
+  read -p '  visible color? ' obs
+done
+```
+
+Repeat per byte position, recording what you observe. Restore your normal
+state afterwards with `repaint-keyboard`.
+
 ### `report86` semantics (from research probes)
 
 - `[0x86, 0x00]` standalone → full keyboard blackout. Also clears any pending

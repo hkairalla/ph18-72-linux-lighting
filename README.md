@@ -88,6 +88,27 @@ If your session does not pick up the new ACLs immediately, log out and back
 in once. The current rule is intentionally permissive for local development
 and should be tightened before broader packaging.
 
+### Restore keyboard state on login (optional)
+
+The firmware reverts to its dynamic animation on cold boot. To replay your
+last `{baseline, overrides}` on graphical login, install the included
+systemd **user** service:
+
+```bash
+# Make sure the daemon binary is on PATH at ~/.local/bin (or edit the
+# service's ExecStart to point wherever your binary lives).
+mkdir -p ~/.local/bin
+cp daemon/target/release/ph18-lighting-daemon ~/.local/bin/
+
+mkdir -p ~/.config/systemd/user
+cp packaging/ph18-lighting-restore.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ph18-lighting-restore.service
+```
+
+The service calls `ph18-lighting-daemon repaint-keyboard`, which re-emits the
+state file at `~/.cache/ph18-lighting/keyboard-state` without modifying it.
+
 Make targets:
 
 ```bash
