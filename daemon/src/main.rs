@@ -1,10 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 
@@ -28,8 +26,9 @@ const KEYBOARD_GREEN_EXPERIMENT_WORD: [u8; 4] = [0x00, 0x00, 0x00, 0xff];
 const MAGKEY_COMMIT_PACKET: [u8; 8] = [0x08, 0x02, 0x4f, 0x05, 0x32, 0x08, 0x01, 0x66];
 const MAGKEY_KEYS: [&str; 4] = ["w", "a", "s", "d"];
 const KEYBOARD_STUBBORN_INDICES: [u16; 4] = [25, 66, 71, 98];
-const REPORT84_REPEAT: usize = 12;
+const REPORT84_REPEAT: usize = 2;
 const DARFON_OUTPUT_PAYLOAD_LEN: usize = 64;
+const KEYBOARD_STATE_RELATIVE: &str = ".cache/ph18-lighting/keyboard-state";
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Acer PH18-72 lighting control daemon")]
@@ -50,7 +49,13 @@ enum Command {
     SetMainKeyboardRed,
     /// Set the main keyboard to the experimental green test word/path.
     SetMainKeyboardGreen,
-    /// Set one logical keyboard key through the report84/report86 path.
+    /// Set the keyboard baseline (whole-board anchor) and clear per-key overrides.
+    SetKeyboardBaseline {
+        /// One of: off, blue, red, green.
+        #[arg(long)]
+        color: String,
+    },
+    /// Add or update a per-key override and repaint the board.
     SetKeyboardKey {
         #[arg(long)]
         key: String,
@@ -61,6 +66,15 @@ enum Command {
         #[arg(long)]
         blue: u8,
     },
+    /// Remove a per-key override and repaint the board.
+    ClearKeyboardKey {
+        #[arg(long)]
+        key: String,
+    },
+    /// Clear all per-key overrides; keep the current baseline.
+    ResetKeyboard,
+    /// Print the current persisted keyboard state.
+    GetKeyboardState,
     /// Set MagKeys using a confirmed safe command shape.
     SetMagkeys {
         #[arg(long)]
@@ -146,12 +160,16 @@ fn main() {
         Command::SetMainKeyboardBlue => set_main_keyboard_blue(),
         Command::SetMainKeyboardRed => set_main_keyboard_red(),
         Command::SetMainKeyboardGreen => set_main_keyboard_green(),
+        Command::SetKeyboardBaseline { color } => set_keyboard_baseline(&color),
         Command::SetKeyboardKey {
             key,
             red,
             green,
             blue,
         } => set_keyboard_key(&key, (red, green, blue)),
+        Command::ClearKeyboardKey { key } => clear_keyboard_key(&key),
+        Command::ResetKeyboard => reset_keyboard(),
+        Command::GetKeyboardState => get_keyboard_state(),
         Command::SetMagkeys { all } => set_magkeys(all),
         Command::SetMagkeysPattern {
             w,
@@ -212,55 +230,140 @@ fn restore_known_good() -> io::Result<()> {
     Ok(())
 }
 
-fn set_main_keyboard_blue() -> io::Result<()> {
-    set_main_keyboard_word(
-        "set-main-keyboard-blue",
-        KEYBOARD_BLUE_WORD,
-        (0, 0, 255),
-        "confirmed visible main keyboard blue path",
-    )
+// Keyboard baseline (whole-board ff02 anchor) palette.
+//
+// On this firmware, report84/report86 per-key writes only land if the board is
+// already in a static frame. The ff02 commit33 sweep is the only known
+// mode-transition out of dynamic, so every per-key operation has to repaint
+// the full board: anchor → overrides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Baseline {
+    Off,
+    Blue,
+    Red,
+    Green,
 }
 
-fn set_main_keyboard_red() -> io::Result<()> {
-    set_main_keyboard_word(
-        "set-main-keyboard-red",
-        KEYBOARD_REDISH_WORD,
-        (255, 0, 0),
-        "experimental commit33 word that previously looked red on this unit",
-    )
+impl Baseline {
+    fn parse(name: &str) -> io::Result<Self> {
+        match normalize_name(name).as_str() {
+            "off" => Ok(Self::Off),
+            "blue" => Ok(Self::Blue),
+            "red" => Ok(Self::Red),
+            "green" => Ok(Self::Green),
+            other => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unknown baseline color '{other}'; expected off, blue, red, or green"),
+            )),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Blue => "blue",
+            Self::Red => "red",
+            Self::Green => "green",
+        }
+    }
+
+    fn word(self) -> [u8; 4] {
+        match self {
+            Self::Off => [0x00, 0x00, 0x00, 0x00],
+            Self::Blue => KEYBOARD_BLUE_WORD,
+            Self::Red => KEYBOARD_REDISH_WORD,
+            Self::Green => KEYBOARD_GREEN_EXPERIMENT_WORD,
+        }
+    }
+
+    fn rgb(self) -> (u8, u8, u8) {
+        match self {
+            Self::Off => (0, 0, 0),
+            Self::Blue => (0, 0, 255),
+            Self::Red => (255, 0, 0),
+            Self::Green => (0, 255, 0),
+        }
+    }
 }
 
-fn set_main_keyboard_green() -> io::Result<()> {
-    set_main_keyboard_word(
-        "set-main-keyboard-green",
-        KEYBOARD_GREEN_EXPERIMENT_WORD,
-        (0, 255, 0),
-        "experimental commit33 word that may map green or another visible state",
-    )
+#[derive(Debug, Clone)]
+struct KeyboardState {
+    baseline: Baseline,
+    overrides: BTreeMap<u16, (u8, u8, u8)>,
 }
 
-fn set_main_keyboard_word(
-    action: &str,
-    word: [u8; 4],
-    correction_rgb: (u8, u8, u8),
-    note: &str,
-) -> io::Result<()> {
+impl Default for KeyboardState {
+    fn default() -> Self {
+        Self {
+            baseline: Baseline::Blue,
+            overrides: BTreeMap::new(),
+        }
+    }
+}
+
+fn keyboard_state_path() -> io::Result<PathBuf> {
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotFound, "HOME env var not set; cannot locate state file")
+    })?;
+    Ok(PathBuf::from(home).join(KEYBOARD_STATE_RELATIVE))
+}
+
+fn load_keyboard_state() -> KeyboardState {
+    // Best-effort load: any IO or parse error falls back to defaults so the
+    // daemon never refuses to operate because of a malformed cache file.
+    let Ok(path) = keyboard_state_path() else {
+        return KeyboardState::default();
+    };
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return KeyboardState::default();
+    };
+
+    let mut state = KeyboardState::default();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("baseline=") {
+            if let Ok(baseline) = Baseline::parse(value) {
+                state.baseline = baseline;
+            }
+        } else if let Some(rest) = line.strip_prefix("override=") {
+            // Format: override=<index>:<r>,<g>,<b>
+            if let Some((index_str, rgb_str)) = rest.split_once(':') {
+                if let (Ok(index), Ok(rgb)) = (index_str.parse::<u16>(), parse_rgb_csv(rgb_str)) {
+                    state.overrides.insert(index, rgb);
+                }
+            }
+        }
+    }
+    state
+}
+
+fn save_keyboard_state(state: &KeyboardState) -> io::Result<()> {
+    let path = keyboard_state_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut buf = String::new();
+    buf.push_str(&format!("baseline={}\n", state.baseline.name()));
+    for (index, &(r, g, b)) in &state.overrides {
+        buf.push_str(&format!("override={index}:{r},{g},{b}\n"));
+    }
+    // Write to a sibling tmp file then rename so a partial write can't corrupt state.
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, buf)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+fn run_ff02_anchor(word: [u8; 4]) -> io::Result<PathBuf> {
     let node = find_ff02_node()?;
     let frame = keyboard_frame(word);
-
-    println!("action={action}");
-    println!("controller=05af:866a");
-    println!("path=ff02_commit33");
-    println!("word={}", hex_string(&word));
-    println!("hidraw={}", node.display());
-    println!("passes=20");
-    println!("banks=8");
-    println!("note={note}");
 
     for packet in PKT_PRELUDE {
         send_feature_ff02(&node, &packet)?;
     }
-
     for _ in 0..20 {
         send_feature_ff02(&node, &PKT_PRE_A)?;
         send_feature_ff02(&node, &PKT_PRE_B)?;
@@ -269,38 +372,80 @@ fn set_main_keyboard_word(
         }
         send_feature_ff02(&node, &PKT_COMMIT33)?;
     }
+    Ok(node)
+}
 
-    patch_stubborn_keyboard_keys(correction_rgb)?;
-
-    println!(
-        "stubborn_indices={}",
-        KEYBOARD_STUBBORN_INDICES
-            .iter()
-            .map(u16::to_string)
-            .collect::<Vec<_>>()
-            .join(",")
-    );
-    println!("result=sent");
+fn paint_index_via_report84(
+    node: &Path,
+    index: u16,
+    color: (u8, u8, u8),
+) -> io::Result<()> {
+    let report84 = build_report84_single_index(index, color.0, color.1, color.2, 1, 8);
+    // Never send [0x86, 0x00] between report84 and [0x86, 0x01]: the blackout
+    // discards the pending per-key buffer and the next [0x86, 0x01] is read
+    // as "return to default dynamic pattern" instead of "commit".
+    for _ in 0..REPORT84_REPEAT {
+        send_feature_report(node, &report84)?;
+        send_feature_report(node, &[0x86, 0x01])?;
+    }
     Ok(())
 }
 
-fn patch_stubborn_keyboard_keys(color: (u8, u8, u8)) -> io::Result<()> {
-    let node = find_vendor_keyboard_node()?;
-    let report82 = build_report82_color(color.0, color.1, color.2, 0xff, 1);
+fn repaint_keyboard(state: &KeyboardState) -> io::Result<(PathBuf, PathBuf)> {
+    let ff02 = run_ff02_anchor(state.baseline.word())?;
+    let vendor = find_vendor_keyboard_node()?;
 
-    send_feature_report(&node, &report82)?;
-    send_feature_report(&node, &[0x86, 0x01])?;
+    // Anchor leaves the four "stubborn" indices wrong, so always rewrite them
+    // to the baseline (unless the user has explicitly overridden them).
+    let baseline_rgb = state.baseline.rgb();
+    let report82 = build_report82_color(baseline_rgb.0, baseline_rgb.1, baseline_rgb.2, 0xff, 1);
+    send_feature_report(&vendor, &report82)?;
+    send_feature_report(&vendor, &[0x86, 0x01])?;
 
     for index in KEYBOARD_STUBBORN_INDICES {
-        let report84 = build_report84_single_index(index, color.0, color.1, color.2, 1, 8);
-        for _ in 0..REPORT84_REPEAT {
-            send_feature_report(&node, &report84)?;
-            send_feature_report(&node, &[0x86, 0x00])?;
-            thread::sleep(Duration::from_millis(10));
-            send_feature_report(&node, &[0x86, 0x01])?;
+        if !state.overrides.contains_key(&index) {
+            paint_index_via_report84(&vendor, index, baseline_rgb)?;
         }
     }
+    for (&index, &rgb) in &state.overrides {
+        paint_index_via_report84(&vendor, index, rgb)?;
+    }
+    Ok((ff02, vendor))
+}
 
+fn set_main_keyboard_blue() -> io::Result<()> {
+    apply_baseline(Baseline::Blue, "set-main-keyboard-blue")
+}
+
+fn set_main_keyboard_red() -> io::Result<()> {
+    apply_baseline(Baseline::Red, "set-main-keyboard-red")
+}
+
+fn set_main_keyboard_green() -> io::Result<()> {
+    apply_baseline(Baseline::Green, "set-main-keyboard-green")
+}
+
+fn set_keyboard_baseline(color: &str) -> io::Result<()> {
+    let baseline = Baseline::parse(color)?;
+    apply_baseline(baseline, "set-keyboard-baseline")
+}
+
+fn apply_baseline(baseline: Baseline, action: &str) -> io::Result<()> {
+    let mut state = load_keyboard_state();
+    state.baseline = baseline;
+    state.overrides.clear();
+    let (ff02, vendor) = repaint_keyboard(&state)?;
+    save_keyboard_state(&state)?;
+
+    println!("action={action}");
+    println!("controller=05af:866a");
+    println!("path=ff02_commit33+report84");
+    println!("baseline={}", baseline.name());
+    println!("baseline_word={}", hex_string(&baseline.word()));
+    println!("ff02_hidraw={}", ff02.display());
+    println!("vendor_hidraw={}", vendor.display());
+    println!("overrides=0");
+    println!("result=sent");
     Ok(())
 }
 
@@ -311,28 +456,78 @@ fn set_keyboard_key(key: &str, color: (u8, u8, u8)) -> io::Result<()> {
             format!("unknown keyboard key {key}"),
         )
     })?;
-    let node = find_vendor_keyboard_node()?;
-    let report84 = build_report84_single_index(index, color.0, color.1, color.2, 1, 8);
+
+    let mut state = load_keyboard_state();
+    state.overrides.insert(index, color);
+    let (ff02, vendor) = repaint_keyboard(&state)?;
+    save_keyboard_state(&state)?;
 
     println!("action=set-keyboard-key");
     println!("controller=05af:866a");
-    println!("path=report84_report86");
+    println!("path=ff02_commit33+report84");
     println!("key={}", normalize_name(key));
     println!("index={index}");
     println!("rgb={},{},{}", color.0, color.1, color.2);
-    println!("hidraw={}", node.display());
-    println!("note=experimental per-key keyboard path");
-
-    for _ in 0..REPORT84_REPEAT {
-        send_feature_report(&node, &report84)?;
-        send_feature_report(&node, &[0x86, 0x00])?;
-        thread::sleep(Duration::from_millis(10));
-        send_feature_report(&node, &[0x86, 0x01])?;
-    }
-
-    println!("report84={}", hex_string(&report84));
-    println!("report86=8601");
+    println!("baseline={}", state.baseline.name());
+    println!("overrides={}", state.overrides.len());
+    println!("ff02_hidraw={}", ff02.display());
+    println!("vendor_hidraw={}", vendor.display());
     println!("result=sent");
+    Ok(())
+}
+
+fn clear_keyboard_key(key: &str) -> io::Result<()> {
+    let index = keyboard_key_index(key).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown keyboard key {key}"),
+        )
+    })?;
+    let mut state = load_keyboard_state();
+    let removed = state.overrides.remove(&index).is_some();
+    let (ff02, vendor) = repaint_keyboard(&state)?;
+    save_keyboard_state(&state)?;
+
+    println!("action=clear-keyboard-key");
+    println!("controller=05af:866a");
+    println!("key={}", normalize_name(key));
+    println!("index={index}");
+    println!("removed={removed}");
+    println!("baseline={}", state.baseline.name());
+    println!("overrides={}", state.overrides.len());
+    println!("ff02_hidraw={}", ff02.display());
+    println!("vendor_hidraw={}", vendor.display());
+    println!("result=sent");
+    Ok(())
+}
+
+fn reset_keyboard() -> io::Result<()> {
+    let mut state = load_keyboard_state();
+    let cleared = state.overrides.len();
+    state.overrides.clear();
+    let (ff02, vendor) = repaint_keyboard(&state)?;
+    save_keyboard_state(&state)?;
+
+    println!("action=reset-keyboard");
+    println!("controller=05af:866a");
+    println!("baseline={}", state.baseline.name());
+    println!("cleared_overrides={cleared}");
+    println!("ff02_hidraw={}", ff02.display());
+    println!("vendor_hidraw={}", vendor.display());
+    println!("result=sent");
+    Ok(())
+}
+
+fn get_keyboard_state() -> io::Result<()> {
+    let state = load_keyboard_state();
+    let path = keyboard_state_path()?;
+    println!("action=get-keyboard-state");
+    println!("state_path={}", path.display());
+    println!("baseline={}", state.baseline.name());
+    println!("overrides={}", state.overrides.len());
+    for (index, &(r, g, b)) in &state.overrides {
+        println!("override={index}:{r},{g},{b}");
+    }
     Ok(())
 }
 
