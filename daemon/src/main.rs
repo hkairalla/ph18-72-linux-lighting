@@ -73,6 +73,19 @@ enum Command {
     },
     /// Clear all per-key overrides; keep the current baseline.
     ResetKeyboard,
+    /// Re-emit the persisted state to hardware without changing it.
+    /// Use this at login (via systemd user service) to restore the last
+    /// applied colors after the firmware has reverted to dynamic mode.
+    RepaintKeyboard,
+    /// Run an ff02 commit33 sweep with an arbitrary 4-byte word.
+    /// Used for research: only `off`/`blue`/`red`/`green` words are confirmed
+    /// today. Does NOT touch the persisted keyboard state, so you can probe
+    /// freely. Word format: hex pairs separated by `:` or just 8 hex chars.
+    /// Example: --word ff:00:00:ff  (the confirmed blue word)
+    ProbeKeyboardWord {
+        #[arg(long)]
+        word: String,
+    },
     /// Print the current persisted keyboard state.
     GetKeyboardState,
     /// Set MagKeys using a confirmed safe command shape.
@@ -169,6 +182,8 @@ fn main() {
         } => set_keyboard_key(&key, (red, green, blue)),
         Command::ClearKeyboardKey { key } => clear_keyboard_key(&key),
         Command::ResetKeyboard => reset_keyboard(),
+        Command::RepaintKeyboard => repaint_keyboard_cmd(),
+        Command::ProbeKeyboardWord { word } => probe_keyboard_word(&word),
         Command::GetKeyboardState => get_keyboard_state(),
         Command::SetMagkeys { all } => set_magkeys(all),
         Command::SetMagkeysPattern {
@@ -512,6 +527,70 @@ fn reset_keyboard() -> io::Result<()> {
     println!("controller=05af:866a");
     println!("baseline={}", state.baseline.name());
     println!("cleared_overrides={cleared}");
+    println!("ff02_hidraw={}", ff02.display());
+    println!("vendor_hidraw={}", vendor.display());
+    println!("result=sent");
+    Ok(())
+}
+
+fn probe_keyboard_word(word_arg: &str) -> io::Result<()> {
+    let word = parse_word_hex(word_arg)?;
+    let ff02 = run_ff02_anchor(word)?;
+
+    println!("action=probe-keyboard-word");
+    println!("controller=05af:866a");
+    println!("path=ff02_commit33");
+    println!("word={}", hex_string(&word));
+    println!("ff02_hidraw={}", ff02.display());
+    let known = match word {
+        [0x00, 0x00, 0x00, 0x00] => Some("off (untested baseline)"),
+        [0xff, 0x00, 0x00, 0xff] => Some("blue"),
+        [0x00, 0x00, 0xff, 0x00] => Some("red-ish"),
+        [0x00, 0x00, 0x00, 0xff] => Some("green"),
+        _ => None,
+    };
+    if let Some(name) = known {
+        println!("known_word={name}");
+    } else {
+        println!("known_word=unknown");
+    }
+    println!("note=probe does not touch persistent keyboard state");
+    println!("result=sent");
+    Ok(())
+}
+
+fn parse_word_hex(value: &str) -> io::Result<[u8; 4]> {
+    let cleaned: String = value
+        .chars()
+        .filter(|c| !matches!(c, ':' | '-' | ' '))
+        .collect();
+    if cleaned.len() != 8 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("expected 8 hex chars (optionally separated by ':'), got '{value}'"),
+        ));
+    }
+    let mut out = [0_u8; 4];
+    for i in 0..4 {
+        let byte = u8::from_str_radix(&cleaned[i * 2..i * 2 + 2], 16).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid hex byte in word '{value}'"),
+            )
+        })?;
+        out[i] = byte;
+    }
+    Ok(out)
+}
+
+fn repaint_keyboard_cmd() -> io::Result<()> {
+    let state = load_keyboard_state();
+    let (ff02, vendor) = repaint_keyboard(&state)?;
+
+    println!("action=repaint-keyboard");
+    println!("controller=05af:866a");
+    println!("baseline={}", state.baseline.name());
+    println!("overrides={}", state.overrides.len());
     println!("ff02_hidraw={}", ff02.display());
     println!("vendor_hidraw={}", vendor.display());
     println!("result=sent");
@@ -1262,4 +1341,138 @@ fn hex_string(bytes: &[u8]) -> String {
         let _ = write!(&mut output, "{byte:02x}");
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report84_layout_blue_q() {
+        // Q = index 39 (0x27), blue, mode=1, brightness=8.
+        // Layout: [0x84, mode, brightness, index*8 (LE u16), (R,G,B,0)*8]
+        let bytes = build_report84_single_index(39, 0, 0, 255, 1, 8);
+        let expected = concat!(
+            "840108",
+            "2700270027002700270027002700270000", // index slots + first byte of pad
+            "00ff00",
+            "000000ff00",
+            "000000ff00",
+            "000000ff00",
+            "000000ff00",
+            "000000ff00",
+            "000000ff00",
+            "000000ff00",
+        ).replace('\n', "");
+        // Easier to just rebuild the expected by hand:
+        let mut want = vec![0x84_u8, 0x01, 0x08];
+        for _ in 0..8 { want.extend_from_slice(&[0x27, 0x00]); }
+        for _ in 0..8 { want.extend_from_slice(&[0x00, 0x00, 0xff, 0x00]); }
+        assert_eq!(bytes, want, "got {}, expected_concat_attempt {}", hex_string(&bytes), expected);
+        assert_eq!(bytes.len(), 51);
+    }
+
+    #[test]
+    fn report84_brightness_is_clamped_to_8() {
+        let bytes = build_report84_single_index(0, 0, 0, 0, 1, 200);
+        assert_eq!(bytes[2], 8, "brightness must clamp to 8 (the firmware max)");
+    }
+
+    #[test]
+    fn report82_layout_blue_mode1() {
+        // counter = 1*16710 + 9415 = 26125 = 0x660d (LE -> 0x0d, 0x66)
+        let bytes = build_report82_color(0, 0, 255, 0xff, 1);
+        assert_eq!(bytes.len(), 29);
+        assert_eq!(bytes[0], 0x82);
+        assert_eq!(&bytes[1..5], &[0x01, 0x00, 0x0d, 0x66]); // mode_index, _, counter LE
+        assert_eq!(&bytes[7..9], &[0x1e, 0x14]); // body[6..8]
+        assert_eq!(&bytes[15..17], &[0x88, 0x13]); // body[14..16]
+        assert_eq!(bytes[19], 0x01); // body[18]
+        assert_eq!(&bytes[23..27], &[0x00, 0x00, 0xff, 0xff]); // R, G, B, A
+        assert_eq!(bytes[27], 0x01); // body[26]
+        assert_eq!(bytes[28], 0x3a); // body[27] = 0x39 + mode_index
+    }
+
+    #[test]
+    fn report82_counter_advances_per_mode_index() {
+        // The body[2..4] counter is a function of mode_index; the daemon repaint
+        // currently only emits mode_index=1, but lock this behavior in to catch
+        // accidental changes to the counter formula.
+        let m1 = build_report82_color(0, 0, 0, 0, 1);
+        let m2 = build_report82_color(0, 0, 0, 0, 2);
+        let c1 = u16::from_le_bytes([m1[3], m1[4]]);
+        let c2 = u16::from_le_bytes([m2[3], m2[4]]);
+        assert_eq!(c1, 1 * 16710 + 9415);
+        assert_eq!(c2, 2 * 16710 + 9415);
+    }
+
+    #[test]
+    fn magkey_frame_blue_routes_to_next_word_byte0() {
+        // W = emitters 0..3. Per the verified word model, blue lands in
+        // frame[(N+1)*4] for emitter N. So all-blue W => bytes 4, 8, 12 = 0xff.
+        let mut emitters = [(0_u8, 0_u8, 0_u8); 12];
+        emitters[0] = (0, 0, 255);
+        emitters[1] = (0, 0, 255);
+        emitters[2] = (0, 0, 255);
+        let frame = build_magkey_frame(&emitters);
+        assert_eq!(frame[4], 0xff, "W-left blue must route to frame[4]");
+        assert_eq!(frame[8], 0xff, "W-top blue must route to frame[8]");
+        assert_eq!(frame[12], 0xff, "W-right blue must route to frame[12]");
+        // No other byte should be set.
+        for (i, &b) in frame.iter().enumerate() {
+            if i == 4 || i == 8 || i == 12 {
+                continue;
+            }
+            assert_eq!(b, 0, "frame[{i}] expected 0, got 0x{b:02x}");
+        }
+    }
+
+    #[test]
+    fn magkey_frame_red_lands_in_byte2() {
+        let mut emitters = [(0_u8, 0_u8, 0_u8); 12];
+        emitters[3] = (255, 0, 0); // A-left
+        let frame = build_magkey_frame(&emitters);
+        assert_eq!(frame[3 * 4 + 2], 0xff, "A-left red must land in frame[14]");
+    }
+
+    #[test]
+    fn keyboard_key_index_round_trip() {
+        // Sanity-check a few canonical names against their fixed indices.
+        // If anyone reorders the match arms, this catches it.
+        assert_eq!(keyboard_key_index("esc"), Some(0));
+        assert_eq!(keyboard_key_index("q"), Some(39));
+        assert_eq!(keyboard_key_index("space"), Some(93));
+        assert_eq!(keyboard_key_index("keypad_enter"), Some(102));
+        // W / A / S / D are intentionally absent: they are MagKeys, not main keys.
+        assert_eq!(keyboard_key_index("w"), None);
+        assert_eq!(keyboard_key_index("a"), None);
+        assert_eq!(keyboard_key_index("s"), None);
+        assert_eq!(keyboard_key_index("d"), None);
+        // Aliases resolve.
+        assert_eq!(keyboard_key_index("ins"), Some(14));
+        assert_eq!(keyboard_key_index("up"), Some(85));
+        // Normalization: case + spaces + dashes.
+        assert_eq!(keyboard_key_index("Caps-Lock"), Some(56));
+        assert_eq!(keyboard_key_index("Print Screen"), Some(13));
+    }
+
+    #[test]
+    fn parse_word_hex_accepts_known_formats() {
+        assert_eq!(parse_word_hex("ff0000ff").unwrap(), [0xff, 0x00, 0x00, 0xff]);
+        assert_eq!(parse_word_hex("ff:00:00:ff").unwrap(), [0xff, 0x00, 0x00, 0xff]);
+        assert_eq!(parse_word_hex("FF-00-00-FF").unwrap(), [0xff, 0x00, 0x00, 0xff]);
+        assert!(parse_word_hex("toolong00").is_err());
+        assert!(parse_word_hex("ff0000zz").is_err());
+    }
+
+    #[test]
+    fn baseline_parse_and_word_map_roundtrip() {
+        for name in ["off", "blue", "red", "green"] {
+            let b = Baseline::parse(name).expect("baseline parses");
+            assert_eq!(b.name(), name);
+            let _ = b.word();
+            let _ = b.rgb();
+        }
+        assert!(Baseline::parse("magenta").is_err());
+    }
 }
