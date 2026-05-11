@@ -21,59 +21,136 @@ const api = (() => {
 })();
 
 /* ── Keyboard layout ─────────────────────────────────────────────────
-   Each entry in a row is either:
-     - [label, daemon-name]                          normal key, width 1
-     - [label, daemon-name, { w: 1.5 }]              wide key
-     - [label, daemon-name, { kind: 'magkey' }]      WASD MagKey marker (disabled)
-     - 'gap'                                         visual separator
-     - null                                          empty slot (preserves position)
-   Daemon-name MUST match one of the names in keyboard_key_index in main.rs.
-   WASD are intentionally inert here — they live in the MagKey panel.
+   The whole keyboard is a single CSS grid: 82 quarter-unit columns by
+   6 rows. 1 unit (1u) = 4 columns. Each key declares its grid-column
+   start + span and its grid-row (with an optional rowSpan for the
+   numpad Enter, which is two rows tall on PH18-72).
+
+   Each entry: { name, label, col, row, span, kind?, rowSpan?, fcls? }
+     name    = daemon key identifier (must match keyboard_key_index in main.rs)
+     col     = grid-column-start (1-indexed)
+     span    = number of columns to span (1u = 4)
+     row     = grid-row (1 = F-row, 2 = number, 3 = QWERTY, 4 = home,
+               5 = bottom, 6 = spacebar)
+     kind    = 'magkey' for WASD (inert; MagKey panel owns these)
+     rowSpan = optional vertical span (used by numpad Enter)
+     fcls    = optional extra class (e.g. 'f-key' for shorter row 1 keys)
 */
-const KB_ROWS = [
-  // F-row: Esc, F1-F12, Prnt/Ins/Del, gap, media+power
-  [['Esc','esc'],['F1','f1'],['F2','f2'],['F3','f3'],['F4','f4'],['F5','f5'],['F6','f6'],
-   ['F7','f7'],['F8','f8'],['F9','f9'],['F10','f10'],['F11','f11'],['F12','f12'],
-   ['Prnt','print_screen'],['Ins','insert'],['Del','delete'],
-   'gap',
-   ['◀◀','media_prev'],['▶∥','media_play_pause'],['▶▶','media_next'],['⏻','power']],
+const KEYS = [
+  // F-row (row 1)
+  { name:'esc',          label:'Esc',  col:1,  span:4, row:1, fcls:'f-key' },
+  { name:'f1',           label:'F1',   col:7,  span:3, row:1, fcls:'f-key' },
+  { name:'f2',           label:'F2',   col:10, span:3, row:1, fcls:'f-key' },
+  { name:'f3',           label:'F3',   col:13, span:3, row:1, fcls:'f-key' },
+  { name:'f4',           label:'F4',   col:16, span:3, row:1, fcls:'f-key' },
+  { name:'f5',           label:'F5',   col:21, span:3, row:1, fcls:'f-key' },
+  { name:'f6',           label:'F6',   col:24, span:3, row:1, fcls:'f-key' },
+  { name:'f7',           label:'F7',   col:27, span:3, row:1, fcls:'f-key' },
+  { name:'f8',           label:'F8',   col:30, span:3, row:1, fcls:'f-key' },
+  { name:'f9',           label:'F9',   col:35, span:3, row:1, fcls:'f-key' },
+  { name:'f10',          label:'F10',  col:38, span:3, row:1, fcls:'f-key' },
+  { name:'f11',          label:'F11',  col:41, span:3, row:1, fcls:'f-key' },
+  { name:'f12',          label:'F12',  col:44, span:3, row:1, fcls:'f-key' },
+  { name:'print_screen', label:'Prnt', col:49, span:4, row:1, fcls:'f-key' },
+  { name:'insert',       label:'Ins',  col:54, span:4, row:1, fcls:'f-key' },
+  { name:'delete',       label:'Del',  col:59, span:4, row:1, fcls:'f-key' },
+  { name:'media_prev',       label:'◀◀', col:65, span:4, row:1, fcls:'f-key' },
+  { name:'media_play_pause', label:'▶∥', col:69, span:4, row:1, fcls:'f-key' },
+  { name:'media_next',       label:'▶▶', col:73, span:4, row:1, fcls:'f-key' },
+  { name:'power',            label:'⏻',  col:77, span:4, row:1, fcls:'f-key' },
 
-  // Number row, then Bksp (2x), gap, numpad top
-  [['`','grave'],['1','1'],['2','2'],['3','3'],['4','4'],['5','5'],['6','6'],
-   ['7','7'],['8','8'],['9','9'],['0','0'],['-','minus'],['=','equal'],
-   ['Bksp','backspace',{w:2}],
-   'gap',
-   ['PS','predator_sense'],['NL','keypad_num_lock'],['/','keypad_divide'],['*','keypad_multiply']],
+  // Number row (row 2)
+  { name:'grave',     label:'`',    col:1,  span:4,  row:2 },
+  { name:'1',         label:'1',    col:5,  span:4,  row:2 },
+  { name:'2',         label:'2',    col:9,  span:4,  row:2 },
+  { name:'3',         label:'3',    col:13, span:4,  row:2 },
+  { name:'4',         label:'4',    col:17, span:4,  row:2 },
+  { name:'5',         label:'5',    col:21, span:4,  row:2 },
+  { name:'6',         label:'6',    col:25, span:4,  row:2 },
+  { name:'7',         label:'7',    col:29, span:4,  row:2 },
+  { name:'8',         label:'8',    col:33, span:4,  row:2 },
+  { name:'9',         label:'9',    col:37, span:4,  row:2 },
+  { name:'0',         label:'0',    col:41, span:4,  row:2 },
+  { name:'minus',     label:'-',    col:45, span:4,  row:2 },
+  { name:'equal',     label:'=',    col:49, span:4,  row:2 },
+  { name:'backspace', label:'Bksp', col:53, span:12, row:2 },
+  { name:'predator_sense',  label:'Pred', col:65, span:4, row:2 },
+  { name:'keypad_num_lock', label:'NL',   col:69, span:4, row:2 },
+  { name:'keypad_divide',   label:'/',    col:73, span:4, row:2 },
+  { name:'keypad_multiply', label:'*',    col:77, span:4, row:2 },
 
-  // QWERTY: Tab (1.5x), Q W(MagKey) E ..., numpad 7-9, kp-minus
-  [['Tab','tab',{w:1.5}],['Q','q'],['W','w',{kind:'magkey'}],['E','e'],['R','r'],['T','t'],['Y','y'],
-   ['U','u'],['I','i'],['O','o'],['P','p'],['[','left_bracket'],[']','right_bracket'],['\\','backslash'],
-   'gap',
-   ['7','keypad_7'],['8','keypad_8'],['9','keypad_9'],['-','keypad_minus']],
+  // QWERTY (row 3)
+  { name:'tab',           label:'Tab', col:1,  span:6,  row:3 },
+  { name:'q',             label:'Q',   col:7,  span:4,  row:3 },
+  { name:'w',             label:'W',   col:11, span:4,  row:3, kind:'magkey' },
+  { name:'e',             label:'E',   col:15, span:4,  row:3 },
+  { name:'r',             label:'R',   col:19, span:4,  row:3 },
+  { name:'t',             label:'T',   col:23, span:4,  row:3 },
+  { name:'y',             label:'Y',   col:27, span:4,  row:3 },
+  { name:'u',             label:'U',   col:31, span:4,  row:3 },
+  { name:'i',             label:'I',   col:35, span:4,  row:3 },
+  { name:'o',             label:'O',   col:39, span:4,  row:3 },
+  { name:'p',             label:'P',   col:43, span:4,  row:3 },
+  { name:'left_bracket',  label:'[',   col:47, span:4,  row:3 },
+  { name:'right_bracket', label:']',   col:51, span:4,  row:3 },
+  { name:'backslash',     label:'\\',  col:55, span:10, row:3 },
+  { name:'keypad_7',     label:'7', col:65, span:4, row:3 },
+  { name:'keypad_8',     label:'8', col:69, span:4, row:3 },
+  { name:'keypad_9',     label:'9', col:73, span:4, row:3 },
+  { name:'keypad_minus', label:'-', col:77, span:4, row:3 },
 
-  // Home row: Caps (1.75x), A(MK) S(MK) D(MK) F..., Enter (2.25x), numpad 4-6 + plus
-  [['Caps','caps_lock',{w:1.75}],
-   ['A','a',{kind:'magkey'}],['S','s',{kind:'magkey'}],['D','d',{kind:'magkey'}],
-   ['F','f'],['G','g'],['H','h'],['J','j'],['K','k'],['L','l'],
-   [';','semicolon'],['"','apostrophe'],['Enter','enter',{w:2.25}],
-   'gap',
-   ['4','keypad_4'],['5','keypad_5'],['6','keypad_6'],['+','keypad_plus']],
+  // Home row (row 4)
+  { name:'caps_lock',  label:'Caps',  col:1,  span:7,  row:4 },
+  { name:'a',          label:'A',     col:8,  span:4,  row:4, kind:'magkey' },
+  { name:'s',          label:'S',     col:12, span:4,  row:4, kind:'magkey' },
+  { name:'d',          label:'D',     col:16, span:4,  row:4, kind:'magkey' },
+  { name:'f',          label:'F',     col:20, span:4,  row:4 },
+  { name:'g',          label:'G',     col:24, span:4,  row:4 },
+  { name:'h',          label:'H',     col:28, span:4,  row:4 },
+  { name:'j',          label:'J',     col:32, span:4,  row:4 },
+  { name:'k',          label:'K',     col:36, span:4,  row:4 },
+  { name:'l',          label:'L',     col:40, span:4,  row:4 },
+  { name:'semicolon',  label:';',     col:44, span:4,  row:4 },
+  { name:'apostrophe', label:'"',     col:48, span:4,  row:4 },
+  { name:'enter',      label:'Enter', col:52, span:13, row:4 },
+  { name:'keypad_4',    label:'4', col:65, span:4, row:4 },
+  { name:'keypad_5',    label:'5', col:69, span:4, row:4 },
+  { name:'keypad_6',    label:'6', col:73, span:4, row:4 },
+  { name:'keypad_plus', label:'+', col:77, span:4, row:4 },
 
-  // Bottom row: LShift (2.25x), letters, arrow_up inline at right, then numpad 1-3
-  [['Shift','left_shift',{w:2.25}],['Z','z'],['X','x'],['C','c'],['V','v'],['B','b'],['N','n'],
-   ['M','m'],[',','comma'],['.','period'],['/','slash'],
-   ['RShift','right_shift',{w:1.75}],
-   ['↑','arrow_up'],
-   'gap',
-   ['1','keypad_1'],['2','keypad_2'],['3','keypad_3'],['Cpilot','copilot']],
+  // Bottom row (row 5) — arrow_up sits in this row at col 61
+  { name:'left_shift',  label:'Shift', col:1,  span:9,  row:5 },
+  { name:'z',           label:'Z',     col:10, span:4,  row:5 },
+  { name:'x',           label:'X',     col:14, span:4,  row:5 },
+  { name:'c',           label:'C',     col:18, span:4,  row:5 },
+  { name:'v',           label:'V',     col:22, span:4,  row:5 },
+  { name:'b',           label:'B',     col:26, span:4,  row:5 },
+  { name:'n',           label:'N',     col:30, span:4,  row:5 },
+  { name:'m',           label:'M',     col:34, span:4,  row:5 },
+  { name:'comma',       label:',',     col:38, span:4,  row:5 },
+  { name:'period',      label:'.',     col:42, span:4,  row:5 },
+  { name:'slash',       label:'/',     col:46, span:4,  row:5 },
+  { name:'right_shift', label:'RShift',col:50, span:11, row:5 },
+  { name:'arrow_up',    label:'Up',    col:61, span:4,  row:5 },
+  { name:'keypad_1',     label:'1',   col:65, span:4, row:5 },
+  { name:'keypad_2',     label:'2',   col:69, span:4, row:5 },
+  { name:'keypad_3',     label:'3',   col:73, span:4, row:5 },
+  { name:'keypad_enter', label:'Ent', col:77, span:4, row:5, rowSpan:2 },
 
-  // Spacebar row: Ctrl, Fn, Win, Alt, Space (6.25x), Alt, Menu, arrows, numpad 0/./Enter
-  [['Ctrl','left_ctrl',{w:1.25}],['Fn','fn'],['Win','left_windows'],['Alt','left_alt',{w:1.25}],
-   ['Space','space',{w:6.25}],
-   ['Alt','right_alt',{w:1.25}],['Menu','menu'],
-   ['←','arrow_left'],['↓','arrow_down'],['→','arrow_right'],
-   'gap',
-   ['0','keypad_0',{w:2}],['.','keypad_decimal'],['Ent','keypad_enter']],
+  // Spacebar row (row 6) — arrow_down sits at col 61 (directly under arrow_up)
+  { name:'left_ctrl',    label:'Ctrl',   col:1,  span:5,  row:6 },
+  { name:'fn',           label:'Fn',     col:6,  span:4,  row:6 },
+  { name:'left_windows', label:'Win',    col:10, span:4,  row:6 },
+  { name:'left_alt',     label:'Alt',    col:14, span:4,  row:6 },
+  { name:'space',        label:'Space',  col:18, span:20, row:6 },
+  { name:'right_alt',    label:'AltGr',  col:38, span:4,  row:6 },
+  { name:'menu',         label:'Menu',   col:42, span:4,  row:6 },
+  { name:'copilot',      label:'Cpilot', col:46, span:11, row:6 },
+  { name:'arrow_left',   label:'Lft',    col:57, span:4,  row:6 },
+  { name:'arrow_down',   label:'Dn',     col:61, span:4,  row:6 },
+  { name:'arrow_right',     label:'Rt',  col:65, span:4, row:6 },
+  { name:'keypad_0',        label:'0',   col:69, span:4, row:6 },
+  { name:'keypad_decimal',  label:'.',   col:73, span:4, row:6 },
 ];
 
 /* ── MagKey emitter spatial data ─────────────────────────────────────
@@ -305,46 +382,27 @@ function wireSliders(rId, gId, bId, swatchId, onChange) {
 /* ── Keyboard panel init ─────────────────────────────────────────────*/
 function initKeyboardPanel() {
   const grid = document.getElementById('keyboard-grid');
-  KB_ROWS.forEach(row => {
-    const rowEl = document.createElement('div');
-    rowEl.className = 'kb-row';
-    row.forEach(entry => {
-      if (entry === 'gap') {
-        const gap = document.createElement('div');
-        gap.className = 'kb-gap';
-        rowEl.appendChild(gap);
-        return;
-      }
-      if (entry === null) {
-        const spacer = document.createElement('div');
-        spacer.className = 'kb-key kb-spacer';
-        rowEl.appendChild(spacer);
-        return;
-      }
-      const [label, name, opts = {}] = entry;
-      const btn = document.createElement('button');
-      const isMagkey = opts.kind === 'magkey';
-      btn.className = 'kb-key' + (isMagkey ? ' kb-magkey' : '');
-      btn.textContent = label;
-      btn.dataset.name = name;
-      if (opts.w) {
-        // Track widths are units of the base key width (~36px) including the inter-key gap.
-        btn.style.flex = `${opts.w} 0 calc(var(--kb-unit) * ${opts.w} + (${opts.w} - 1) * var(--kb-gap))`;
-      }
-      if (isMagkey) {
-        btn.title = 'MagKey — use the MagKey 3.0 panel';
-        btn.tabIndex = -1;
-      } else {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('.kb-key').forEach(k => k.classList.remove('selected'));
-          btn.classList.add('selected');
-          state.kbKey = name;
-          document.getElementById('kb-selected-label').textContent = label;
-        });
-      }
-      rowEl.appendChild(btn);
-    });
-    grid.appendChild(rowEl);
+  KEYS.forEach(k => {
+    const btn = document.createElement('button');
+    const isMagkey = k.kind === 'magkey';
+    btn.className = 'kb-key' + (isMagkey ? ' kb-magkey' : '') + (k.fcls ? ' ' + k.fcls : '');
+    btn.type = 'button';
+    btn.textContent = k.label;
+    btn.dataset.name = k.name;
+    btn.style.gridColumn = `${k.col} / span ${k.span}`;
+    btn.style.gridRow = k.rowSpan ? `${k.row} / span ${k.rowSpan}` : String(k.row);
+    if (isMagkey) {
+      btn.title = 'MagKey — use the MagKey 3.0 panel';
+      btn.tabIndex = -1;
+    } else {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.kb-key.selected').forEach(x => x.classList.remove('selected'));
+        btn.classList.add('selected');
+        state.kbKey = k.name;
+        document.getElementById('kb-selected-label').textContent = k.label;
+      });
+    }
+    grid.appendChild(btn);
   });
 
   const getKbRgb = wireSliders('kb-r', 'kb-g', 'kb-b', 'kb-swatch');

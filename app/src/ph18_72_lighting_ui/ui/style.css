@@ -524,23 +524,27 @@ body {
 /* ── Keyboard grid ─────────────────────────────────────────────────── */
 .keyboard-main {
   padding: 16px;
+  /* The keyboard grid is ~738px wide (82 × 9px cell). Allow horizontal scroll
+     if the window is narrower than the keyboard. */
+  overflow-x: auto;
 }
+/* The keyboard is one big CSS grid: 82 quarter-unit columns by 6 rows.
+   1 unit (1u) = 4 columns. Keys position themselves via grid-column /
+   grid-row inline styles set in JS. The F-row is shorter than the others
+   so it stays visually distinct. */
 .keyboard-grid {
-  --kb-unit: 32px;
-  --kb-gap: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.kb-row {
-  display: flex;
-  gap: var(--kb-gap);
+  --cell:        9px;
+  --row-h:       36px;       /* = 4 × --cell, so a 1u key is square */
+  --row-h-small: 28px;
+  display: grid;
+  grid-template-columns: repeat(82, var(--cell));
+  grid-template-rows: var(--row-h-small) repeat(5, var(--row-h));
+  column-gap: 0;
+  row-gap: 5px;
+  width: max-content;
 }
 .kb-key {
-  flex: 1 0 var(--kb-unit);
-  min-width: var(--kb-unit);
-  height: var(--kb-unit);
-  padding: 0 6px;
+  padding: 0 4px;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--bg-card);
@@ -553,10 +557,14 @@ body {
   align-items: center;
   justify-content: center;
   white-space: nowrap;
+  overflow: hidden;
+  /* Inset margin gives the visual gap between adjacent keys without
+     inflating the total grid width via grid column-gap. */
+  margin: 2px;
 }
 .kb-key:hover { border-color: var(--border-mid); color: var(--text); background: var(--bg-hover); }
 .kb-key.selected { border-color: var(--accent); background: var(--bg-selected); color: var(--text); }
-.kb-key.disabled { opacity: 0.35; cursor: not-allowed; }
+.kb-key.f-key { font-size: 10px; }
 .kb-key.kb-magkey {
   opacity: 0.5;
   cursor: not-allowed;
@@ -567,13 +575,6 @@ body {
   border-color: var(--border);
   color: var(--text-dim);
   background: var(--bg-card);
-}
-.kb-spacer {
-  visibility: hidden;
-  pointer-events: none;
-}
-.kb-gap {
-  flex: 0 0 12px;
 }
 
 /* ── Cover logo ────────────────────────────────────────────────────── */
