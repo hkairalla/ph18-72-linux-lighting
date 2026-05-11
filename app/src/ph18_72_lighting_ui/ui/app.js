@@ -22,18 +22,42 @@ const api = (() => {
 
 /* ── Keyboard layout ─────────────────────────────────────────────────*/
 const KB_ROWS = [
-  [['Esc','esc'],['1','1'],['2','2'],['3','3'],['4','4'],['5/%','5'],['6','6'],
+  // F-keys
+  [['Esc','esc'],['F1','f1'],['F2','f2'],['F3','f3'],['F4','f4'],['F5','f5'],['F6','f6'],
+   ['F7','f7'],['F8','f8'],['F9','f9'],['F10','f10'],['F11','f11'],['F12','f12'],
+   ['Prnt','print_screen'],['Ins','insert'],['Del','delete']],
+
+  // Numbers + modifiers
+  [['`','grave'],['1','1'],['2','2'],['3','3'],['4','4'],['5','5'],['6','6'],
    ['7','7'],['8','8'],['9','9'],['0','0'],['-','minus'],['=','equal'],['Bksp','backspace']],
+
+  // QWERTY
   [['Tab','tab'],['Q','q'],['W','w'],['E','e'],['R','r'],['T','t'],['Y','y'],
    ['U','u'],['I','i'],['O','o'],['P','p'],['[','left_bracket'],[']','right_bracket'],['\\','backslash']],
+
+  // Home row
   [['Caps','caps_lock'],['A','a'],['S','s'],['D','d'],['F','f'],['G','g'],['H','h'],
-   ['J','j'],['K','k'],['L','l'],[';/:','semicolon'],["'",'apostrophe'],['Enter','enter']],
+   ['J','j'],['K','k'],['L','l'],[';','semicolon'],['"','apostrophe'],['Enter','enter']],
+
+  // Bottom row
   [['Shift','left_shift'],['Z','z'],['X','x'],['C','c'],['V','v'],['B','b'],['N','n'],
-   ['M','m'],[',','comma'],['.','.period'],['/','/slash'],['RShift','right_shift']],
+   ['M','m'],[',','comma'],['.','period'],['/','slash'],['RShift','right_shift']],
+
+  // Spacebar + arrows
   [['Ctrl','left_ctrl'],['Win','left_windows'],['Alt','left_alt'],['Space','space'],
-   ['RAlt','right_alt'],['←','arrow_left'],['↓','arrow_down'],['→','arrow_right'],['↑','arrow_up']],
+   ['RAlt','right_alt'],['Fn','fn'],['Menu','menu'],['Ctrl','right_ctrl']],
+
+  // Arrow cluster
+  [['',''],['↑','arrow_up'],['','']],
+  [['←','arrow_left'],['↓','arrow_down'],['→','arrow_right']],
 ];
-const KB_ENABLED = new Set(['5','semicolon','keypad_6','arrow_down']);
+const KB_ENABLED = new Set(['esc','f1','f2','f3','f4','f5','f6','f7','f8','f9','f10','f11','f12',
+  'print_screen','insert','delete','grave','1','2','3','4','5','6','7','8','9','0','minus','equal','backspace',
+  'tab','q','w','e','r','t','y','u','i','o','p','left_bracket','right_bracket','backslash',
+  'caps_lock','a','s','d','f','g','h','j','k','l','semicolon','apostrophe','enter',
+  'left_shift','z','x','c','v','b','n','m','comma','period','slash','right_shift',
+  'left_ctrl','left_windows','left_alt','space','right_alt','fn','menu','right_ctrl',
+  'arrow_up','arrow_down','arrow_left','arrow_right']);
 
 /* ── MagKey emitter spatial data ─────────────────────────────────────
    Real 2D coordinates derived from hardware photo (2026-04-26).
