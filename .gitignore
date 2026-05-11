@@ -22,3 +22,8 @@ target/
 *.log
 *.pid
 *.socket
+
+# Per-user editor/assistant config
+.claude/settings.local.json
+.vscode/
+.idea/
