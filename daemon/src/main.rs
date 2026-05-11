@@ -20,12 +20,14 @@ const PKT_PRELUDE: [[u8; 8]; 6] = [
 const PKT_PRE_A: [u8; 8] = [0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x77];
 const PKT_PRE_B: [u8; 8] = [0x12, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0xe5];
 const PKT_COMMIT33: [u8; 8] = [0x08, 0x02, 0x33, 0x05, 0x32, 0x08, 0x01, 0x82];
-const KEYBOARD_BLUE_WORD: [u8; 4] = [0xff, 0x00, 0x00, 0xff];
-const KEYBOARD_REDISH_WORD: [u8; 4] = [0x00, 0x00, 0xff, 0x00];
-const KEYBOARD_GREEN_EXPERIMENT_WORD: [u8; 4] = [0x00, 0x00, 0x00, 0xff];
+// Confirmed ff02 commit33 word encoding (2026-05-11 probe):
+//   word = [0xff, R, G, B]
+// Byte 0 = 0xff puts the controller in "broadcast" mode where the word
+// reaches all 102 main-keyboard indices. Without it the write only lands on
+// ~98 indices, leaving stragglers tinted by the previous baseline. Bytes
+// 1/2/3 are conventional 8-bit R/G/B channels.
 const MAGKEY_COMMIT_PACKET: [u8; 8] = [0x08, 0x02, 0x4f, 0x05, 0x32, 0x08, 0x01, 0x66];
 const MAGKEY_KEYS: [&str; 4] = ["w", "a", "s", "d"];
-const KEYBOARD_STUBBORN_INDICES: [u16; 4] = [25, 66, 71, 98];
 const REPORT84_REPEAT: usize = 2;
 const DARFON_OUTPUT_PAYLOAD_LEN: usize = 64;
 const KEYBOARD_STATE_RELATIVE: &str = ".cache/ph18-lighting/keyboard-state";
@@ -245,72 +247,58 @@ fn restore_known_good() -> io::Result<()> {
     Ok(())
 }
 
-// Keyboard baseline (whole-board ff02 anchor) palette.
+// Keyboard baseline (whole-board ff02 anchor) handling.
 //
-// On this firmware, report84/report86 per-key writes only land if the board is
-// already in a static frame. The ff02 commit33 sweep is the only known
-// mode-transition out of dynamic, so every per-key operation has to repaint
-// the full board: anchor → overrides.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Baseline {
-    Off,
-    Blue,
-    Red,
-    Green,
+// On this firmware, report84/report86 per-key writes only land if the board
+// is already in a static frame. The ff02 commit33 sweep is the only known
+// mode-transition out of dynamic.
+//
+// The ff02 word encoding is `[0xff, R, G, B]` (see the constant block at the
+// top of this file). Any 24-bit RGB can be a baseline; named colors are just
+// convenient aliases.
+
+fn baseline_word(rgb: (u8, u8, u8)) -> [u8; 4] {
+    [0xff, rgb.0, rgb.1, rgb.2]
 }
 
-impl Baseline {
-    fn parse(name: &str) -> io::Result<Self> {
-        match normalize_name(name).as_str() {
-            "off" => Ok(Self::Off),
-            "blue" => Ok(Self::Blue),
-            "red" => Ok(Self::Red),
-            "green" => Ok(Self::Green),
-            other => Err(io::Error::new(
+fn parse_baseline_color(input: &str) -> io::Result<(u8, u8, u8)> {
+    match normalize_name(input).as_str() {
+        "off" => Ok((0, 0, 0)),
+        "blue" => Ok((0, 0, 255)),
+        "red" => Ok((255, 0, 0)),
+        "green" => Ok((0, 255, 0)),
+        _ => parse_rgb_csv(input).map_err(|_| {
+            io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("unknown baseline color '{other}'; expected off, blue, red, or green"),
-            )),
-        }
+                format!(
+                    "unknown baseline color '{input}'; expected off/blue/red/green or R,G,B"
+                ),
+            )
+        }),
     }
+}
 
-    fn name(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Blue => "blue",
-            Self::Red => "red",
-            Self::Green => "green",
-        }
-    }
-
-    fn word(self) -> [u8; 4] {
-        match self {
-            Self::Off => [0x00, 0x00, 0x00, 0x00],
-            Self::Blue => KEYBOARD_BLUE_WORD,
-            Self::Red => KEYBOARD_REDISH_WORD,
-            Self::Green => KEYBOARD_GREEN_EXPERIMENT_WORD,
-        }
-    }
-
-    fn rgb(self) -> (u8, u8, u8) {
-        match self {
-            Self::Off => (0, 0, 0),
-            Self::Blue => (0, 0, 255),
-            Self::Red => (255, 0, 0),
-            Self::Green => (0, 255, 0),
-        }
+fn baseline_name(rgb: (u8, u8, u8)) -> String {
+    // Friendly display: render presets by name, custom colors as CSV.
+    match rgb {
+        (0, 0, 0) => "off".to_string(),
+        (0, 0, 255) => "blue".to_string(),
+        (255, 0, 0) => "red".to_string(),
+        (0, 255, 0) => "green".to_string(),
+        (r, g, b) => format!("{r},{g},{b}"),
     }
 }
 
 #[derive(Debug, Clone)]
 struct KeyboardState {
-    baseline: Baseline,
+    baseline_rgb: (u8, u8, u8),
     overrides: BTreeMap<u16, (u8, u8, u8)>,
 }
 
 impl Default for KeyboardState {
     fn default() -> Self {
         Self {
-            baseline: Baseline::Blue,
+            baseline_rgb: (0, 0, 255),
             overrides: BTreeMap::new(),
         }
     }
@@ -340,8 +328,9 @@ fn load_keyboard_state() -> KeyboardState {
             continue;
         }
         if let Some(value) = line.strip_prefix("baseline=") {
-            if let Ok(baseline) = Baseline::parse(value) {
-                state.baseline = baseline;
+            // Accepts either a named preset (legacy state files) or R,G,B.
+            if let Ok(rgb) = parse_baseline_color(value) {
+                state.baseline_rgb = rgb;
             }
         } else if let Some(rest) = line.strip_prefix("override=") {
             // Format: override=<index>:<r>,<g>,<b>
@@ -361,7 +350,8 @@ fn save_keyboard_state(state: &KeyboardState) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     let mut buf = String::new();
-    buf.push_str(&format!("baseline={}\n", state.baseline.name()));
+    let (br, bg, bb) = state.baseline_rgb;
+    buf.push_str(&format!("baseline={br},{bg},{bb}\n"));
     for (index, &(r, g, b)) in &state.overrides {
         buf.push_str(&format!("override={index}:{r},{g},{b}\n"));
     }
@@ -407,21 +397,14 @@ fn paint_index_via_report84(
 }
 
 fn repaint_keyboard(state: &KeyboardState) -> io::Result<(PathBuf, PathBuf)> {
-    let ff02 = run_ff02_anchor(state.baseline.word())?;
+    // The ff02 anchor now uses byte 0 = 0xff broadcast mode (see
+    // `baseline_word`), which reaches all 102 main-keyboard indices
+    // uniformly. Previous code patched a hardcoded list of "stubborn"
+    // indices afterwards; that was a workaround for the incomplete legacy
+    // words and is no longer needed.
+    let ff02 = run_ff02_anchor(baseline_word(state.baseline_rgb))?;
     let vendor = find_vendor_keyboard_node()?;
 
-    // Anchor leaves the four "stubborn" indices wrong, so always rewrite them
-    // to the baseline (unless the user has explicitly overridden them).
-    let baseline_rgb = state.baseline.rgb();
-    let report82 = build_report82_color(baseline_rgb.0, baseline_rgb.1, baseline_rgb.2, 0xff, 1);
-    send_feature_report(&vendor, &report82)?;
-    send_feature_report(&vendor, &[0x86, 0x01])?;
-
-    for index in KEYBOARD_STUBBORN_INDICES {
-        if !state.overrides.contains_key(&index) {
-            paint_index_via_report84(&vendor, index, baseline_rgb)?;
-        }
-    }
     for (&index, &rgb) in &state.overrides {
         paint_index_via_report84(&vendor, index, rgb)?;
     }
@@ -429,34 +412,35 @@ fn repaint_keyboard(state: &KeyboardState) -> io::Result<(PathBuf, PathBuf)> {
 }
 
 fn set_main_keyboard_blue() -> io::Result<()> {
-    apply_baseline(Baseline::Blue, "set-main-keyboard-blue")
+    apply_baseline((0, 0, 255), "set-main-keyboard-blue")
 }
 
 fn set_main_keyboard_red() -> io::Result<()> {
-    apply_baseline(Baseline::Red, "set-main-keyboard-red")
+    apply_baseline((255, 0, 0), "set-main-keyboard-red")
 }
 
 fn set_main_keyboard_green() -> io::Result<()> {
-    apply_baseline(Baseline::Green, "set-main-keyboard-green")
+    apply_baseline((0, 255, 0), "set-main-keyboard-green")
 }
 
 fn set_keyboard_baseline(color: &str) -> io::Result<()> {
-    let baseline = Baseline::parse(color)?;
-    apply_baseline(baseline, "set-keyboard-baseline")
+    let rgb = parse_baseline_color(color)?;
+    apply_baseline(rgb, "set-keyboard-baseline")
 }
 
-fn apply_baseline(baseline: Baseline, action: &str) -> io::Result<()> {
+fn apply_baseline(rgb: (u8, u8, u8), action: &str) -> io::Result<()> {
     let mut state = load_keyboard_state();
-    state.baseline = baseline;
+    state.baseline_rgb = rgb;
     state.overrides.clear();
     let (ff02, vendor) = repaint_keyboard(&state)?;
     save_keyboard_state(&state)?;
 
     println!("action={action}");
     println!("controller=05af:866a");
-    println!("path=ff02_commit33+report84");
-    println!("baseline={}", baseline.name());
-    println!("baseline_word={}", hex_string(&baseline.word()));
+    println!("path=ff02_commit33");
+    println!("baseline={}", baseline_name(rgb));
+    println!("baseline_rgb={},{},{}", rgb.0, rgb.1, rgb.2);
+    println!("baseline_word={}", hex_string(&baseline_word(rgb)));
     println!("ff02_hidraw={}", ff02.display());
     println!("vendor_hidraw={}", vendor.display());
     println!("overrides=0");
@@ -474,18 +458,25 @@ fn set_keyboard_key(key: &str, color: (u8, u8, u8)) -> io::Result<()> {
 
     let mut state = load_keyboard_state();
     state.overrides.insert(index, color);
-    let (ff02, vendor) = repaint_keyboard(&state)?;
+
+    // Fast path: assume firmware is already in static mode (a baseline anchor
+    // has been applied at some point this session). Write the single key via
+    // report84/report86=1 — no whole-board ff02 anchor, no MagKey-channel
+    // side effects, no visible flicker on other keys. If the firmware has
+    // drifted back to dynamic, this write is silently absorbed; recovery is
+    // `set-keyboard-baseline` or `repaint-keyboard`.
+    let vendor = find_vendor_keyboard_node()?;
+    paint_index_via_report84(&vendor, index, color)?;
     save_keyboard_state(&state)?;
 
     println!("action=set-keyboard-key");
     println!("controller=05af:866a");
-    println!("path=ff02_commit33+report84");
+    println!("path=report84_report86");
     println!("key={}", normalize_name(key));
     println!("index={index}");
     println!("rgb={},{},{}", color.0, color.1, color.2);
-    println!("baseline={}", state.baseline.name());
+    println!("baseline={}", baseline_name(state.baseline_rgb));
     println!("overrides={}", state.overrides.len());
-    println!("ff02_hidraw={}", ff02.display());
     println!("vendor_hidraw={}", vendor.display());
     println!("result=sent");
     Ok(())
@@ -500,17 +491,23 @@ fn clear_keyboard_key(key: &str) -> io::Result<()> {
     })?;
     let mut state = load_keyboard_state();
     let removed = state.overrides.remove(&index).is_some();
-    let (ff02, vendor) = repaint_keyboard(&state)?;
+    let baseline_rgb = state.baseline_rgb;
+
+    // Fast path: paint the cleared key with the baseline color via report84,
+    // matching the visual result of a full repaint without the cost.
+    let vendor = find_vendor_keyboard_node()?;
+    paint_index_via_report84(&vendor, index, baseline_rgb)?;
     save_keyboard_state(&state)?;
 
     println!("action=clear-keyboard-key");
     println!("controller=05af:866a");
+    println!("path=report84_report86");
     println!("key={}", normalize_name(key));
     println!("index={index}");
     println!("removed={removed}");
-    println!("baseline={}", state.baseline.name());
+    println!("baseline={}", baseline_name(state.baseline_rgb));
+    println!("baseline_rgb={},{},{}", baseline_rgb.0, baseline_rgb.1, baseline_rgb.2);
     println!("overrides={}", state.overrides.len());
-    println!("ff02_hidraw={}", ff02.display());
     println!("vendor_hidraw={}", vendor.display());
     println!("result=sent");
     Ok(())
@@ -525,7 +522,7 @@ fn reset_keyboard() -> io::Result<()> {
 
     println!("action=reset-keyboard");
     println!("controller=05af:866a");
-    println!("baseline={}", state.baseline.name());
+    println!("baseline={}", baseline_name(state.baseline_rgb));
     println!("cleared_overrides={cleared}");
     println!("ff02_hidraw={}", ff02.display());
     println!("vendor_hidraw={}", vendor.display());
@@ -542,17 +539,13 @@ fn probe_keyboard_word(word_arg: &str) -> io::Result<()> {
     println!("path=ff02_commit33");
     println!("word={}", hex_string(&word));
     println!("ff02_hidraw={}", ff02.display());
-    let known = match word {
-        [0x00, 0x00, 0x00, 0x00] => Some("off (untested baseline)"),
-        [0xff, 0x00, 0x00, 0xff] => Some("blue"),
-        [0x00, 0x00, 0xff, 0x00] => Some("red-ish"),
-        [0x00, 0x00, 0x00, 0xff] => Some("green"),
-        _ => None,
-    };
-    if let Some(name) = known {
-        println!("known_word={name}");
+    if word[0] == 0xff {
+        println!(
+            "decoded=broadcast R={} G={} B={} (all 102 keys)",
+            word[1], word[2], word[3]
+        );
     } else {
-        println!("known_word=unknown");
+        println!("decoded=legacy mode (byte 0 != 0xff); partial coverage on this firmware");
     }
     println!("note=probe does not touch persistent keyboard state");
     println!("result=sent");
@@ -589,7 +582,7 @@ fn repaint_keyboard_cmd() -> io::Result<()> {
 
     println!("action=repaint-keyboard");
     println!("controller=05af:866a");
-    println!("baseline={}", state.baseline.name());
+    println!("baseline={}", baseline_name(state.baseline_rgb));
     println!("overrides={}", state.overrides.len());
     println!("ff02_hidraw={}", ff02.display());
     println!("vendor_hidraw={}", vendor.display());
@@ -602,7 +595,7 @@ fn get_keyboard_state() -> io::Result<()> {
     let path = keyboard_state_path()?;
     println!("action=get-keyboard-state");
     println!("state_path={}", path.display());
-    println!("baseline={}", state.baseline.name());
+    println!("baseline={}", baseline_name(state.baseline_rgb));
     println!("overrides={}", state.overrides.len());
     for (index, &(r, g, b)) in &state.overrides {
         println!("override={index}:{r},{g},{b}");
@@ -1055,6 +1048,9 @@ fn build_report84_single_index(
     payload
 }
 
+// Retained as protocol documentation + test coverage even though no
+// production code path currently uses it (see repaint_keyboard).
+#[allow(dead_code)]
 fn build_report82_color(red: u8, green: u8, blue: u8, alpha: u8, mode_index: u8) -> Vec<u8> {
     let counter = u16::from(mode_index) * 16710 + 9415;
     let mut body = vec![0_u8; 28];
@@ -1466,13 +1462,35 @@ mod tests {
     }
 
     #[test]
-    fn baseline_parse_and_word_map_roundtrip() {
-        for name in ["off", "blue", "red", "green"] {
-            let b = Baseline::parse(name).expect("baseline parses");
-            assert_eq!(b.name(), name);
-            let _ = b.word();
-            let _ = b.rgb();
-        }
-        assert!(Baseline::parse("magenta").is_err());
+    fn parse_baseline_color_named_and_rgb() {
+        assert_eq!(parse_baseline_color("off").unwrap(), (0, 0, 0));
+        assert_eq!(parse_baseline_color("blue").unwrap(), (0, 0, 255));
+        assert_eq!(parse_baseline_color("red").unwrap(), (255, 0, 0));
+        assert_eq!(parse_baseline_color("green").unwrap(), (0, 255, 0));
+        assert_eq!(parse_baseline_color("128,64,255").unwrap(), (128, 64, 255));
+        assert_eq!(parse_baseline_color("0,0,0").unwrap(), (0, 0, 0));
+        // Bad names / bad CSV fail.
+        assert!(parse_baseline_color("magenta").is_err());
+        assert!(parse_baseline_color("not,a,number").is_err());
+    }
+
+    #[test]
+    fn baseline_word_uses_broadcast_byte0() {
+        // The 4-byte ff02 word is [0xff, R, G, B]. Byte 0 = 0xff is the
+        // "broadcast" flag that makes the write reach all 102 keys.
+        assert_eq!(baseline_word((0, 0, 255)), [0xff, 0x00, 0x00, 0xff]);
+        assert_eq!(baseline_word((255, 0, 0)), [0xff, 0xff, 0x00, 0x00]);
+        assert_eq!(baseline_word((0, 255, 0)), [0xff, 0x00, 0xff, 0x00]);
+        assert_eq!(baseline_word((0, 0, 0)), [0xff, 0x00, 0x00, 0x00]);
+        assert_eq!(baseline_word((128, 64, 32)), [0xff, 0x80, 0x40, 0x20]);
+    }
+
+    #[test]
+    fn baseline_name_renders_presets_and_rgb() {
+        assert_eq!(baseline_name((0, 0, 0)), "off");
+        assert_eq!(baseline_name((0, 0, 255)), "blue");
+        assert_eq!(baseline_name((255, 0, 0)), "red");
+        assert_eq!(baseline_name((0, 255, 0)), "green");
+        assert_eq!(baseline_name((128, 64, 32)), "128,64,32");
     }
 }
