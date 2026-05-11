@@ -362,6 +362,17 @@ fn save_keyboard_state(state: &KeyboardState) -> io::Result<()> {
     Ok(())
 }
 
+// ff02 commit33 anchor count. The original research script used 20 × 8
+// (≈12 s on this hardware). 10 × 4 is the minimum that reliably paints all
+// 102 keys with the broadcast-mode word on this unit. Below that the right
+// half of the board stops committing. ~4 s per baseline change.
+//
+// We tried batching report84 (8 indices per packet) as an alternative, but
+// the firmware only commits a partial set of the 8 slots per write, so
+// coverage was incomplete. The ff02 sweep stays as the baseline path.
+const FF02_ANCHOR_PASSES: usize = 10;
+const FF02_ANCHOR_BANKS: usize = 4;
+
 fn run_ff02_anchor(word: [u8; 4]) -> io::Result<PathBuf> {
     let node = find_ff02_node()?;
     let frame = keyboard_frame(word);
@@ -369,10 +380,10 @@ fn run_ff02_anchor(word: [u8; 4]) -> io::Result<PathBuf> {
     for packet in PKT_PRELUDE {
         send_feature_ff02(&node, &packet)?;
     }
-    for _ in 0..20 {
+    for _ in 0..FF02_ANCHOR_PASSES {
         send_feature_ff02(&node, &PKT_PRE_A)?;
         send_feature_ff02(&node, &PKT_PRE_B)?;
-        for _ in 0..8 {
+        for _ in 0..FF02_ANCHOR_BANKS {
             send_out64(&node, &frame)?;
         }
         send_feature_ff02(&node, &PKT_COMMIT33)?;
@@ -397,11 +408,9 @@ fn paint_index_via_report84(
 }
 
 fn repaint_keyboard(state: &KeyboardState) -> io::Result<(PathBuf, PathBuf)> {
-    // The ff02 anchor now uses byte 0 = 0xff broadcast mode (see
-    // `baseline_word`), which reaches all 102 main-keyboard indices
-    // uniformly. Previous code patched a hardcoded list of "stubborn"
-    // indices afterwards; that was a workaround for the incomplete legacy
-    // words and is no longer needed.
+    // The ff02 anchor with byte-0=0xff broadcast word paints every index
+    // uniformly (no more "stubborn keys" workaround). Per-key overrides
+    // land on top via report84/report86=0x01.
     let ff02 = run_ff02_anchor(baseline_word(state.baseline_rgb))?;
     let vendor = find_vendor_keyboard_node()?;
 
@@ -1492,5 +1501,89 @@ mod tests {
         assert_eq!(baseline_name((255, 0, 0)), "red");
         assert_eq!(baseline_name((0, 255, 0)), "green");
         assert_eq!(baseline_name((128, 64, 32)), "128,64,32");
+    }
+
+    #[test]
+    fn keyboard_state_file_round_trip() {
+        // Point the daemon at a scratch HOME so we don't touch the real
+        // cache file. save → load must give back the same {baseline, overrides}.
+        let tmp = std::env::temp_dir().join(format!(
+            "ph18-state-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // SAFETY: tests in this crate run single-threaded by default
+        // (`cargo test -- --test-threads=1` is the convention here since
+        // they share the HOME-overridden global). Even without that, this
+        // test only mutates HOME inside its own scope.
+        let original_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &tmp) };
+
+        let mut state = KeyboardState::default();
+        state.baseline_rgb = (200, 50, 100);
+        state.overrides.insert(39, (255, 0, 0));   // Q red
+        state.overrides.insert(41, (0, 255, 0));   // E green
+        state.overrides.insert(85, (10, 20, 30));  // arrow_up arbitrary
+
+        save_keyboard_state(&state).expect("save");
+        let loaded = load_keyboard_state();
+
+        assert_eq!(loaded.baseline_rgb, (200, 50, 100));
+        assert_eq!(loaded.overrides.len(), 3);
+        assert_eq!(loaded.overrides.get(&39), Some(&(255, 0, 0)));
+        assert_eq!(loaded.overrides.get(&41), Some(&(0, 255, 0)));
+        assert_eq!(loaded.overrides.get(&85), Some(&(10, 20, 30)));
+
+        // Restore HOME and clean up. set_var/remove_var are also `unsafe`
+        // in current Rust.
+        unsafe {
+            match original_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn keyboard_state_file_parses_legacy_named_baseline() {
+        // Older state files (pre-broadcast-encoding refactor) wrote
+        // `baseline=blue` instead of `baseline=0,0,255`. Loader must
+        // accept both so an upgrade doesn't lose state.
+        let tmp = std::env::temp_dir().join(format!(
+            "ph18-state-legacy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&tmp).unwrap();
+        let state_dir = tmp.join(".cache").join("ph18-lighting");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::write(
+            state_dir.join("keyboard-state"),
+            "baseline=red\noverride=39:255,0,0\n",
+        )
+        .unwrap();
+
+        let original_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &tmp) };
+
+        let loaded = load_keyboard_state();
+        assert_eq!(loaded.baseline_rgb, (255, 0, 0), "named 'red' must parse to RGB");
+        assert_eq!(loaded.overrides.get(&39), Some(&(255, 0, 0)));
+
+        unsafe {
+            match original_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
