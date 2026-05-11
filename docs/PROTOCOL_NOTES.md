@@ -1,88 +1,108 @@
 # Protocol Notes
 
-This file is the sanitized public record of what the private research workspace has confirmed. Keep raw packet captures, exploratory scripts, screenshots, and command logs out of this repo.
+Sanitized public record of what the daemon currently knows. Raw packet
+captures, exploratory scripts, screenshots, and command logs are kept out of
+this repo (`testing/` is git-ignored).
 
 ## Known Controllers
 
 | Device | Role |
 | --- | --- |
-| HID `05af:866a` | Acer/Jing-Mold keyboard-class controller. Used for main keyboard and MagKey paths. |
-| HID `0d62:ba51` | Darfon cover-logo controller. Used for short cover-logo color and brightness commands. |
-| Acer WMI/ACPI | Present on the machine and still plausible for unresolved Base Logo / Infinity Mirror work. Treat as read-only until methods are understood. |
+| HID `05af:866a` | Acer/Jing-Mold keyboard-class controller. Drives both the main keyboard (ff02 commit33 + `report82/84/85/86`) and MagKeys (ff02 LED-map). |
+| HID `0d62:ba51` | Darfon cover-logo controller. Short-packet color and brightness commands. |
+| Acer WMI/ACPI | Present on the machine; still plausible for unresolved Base Logo / Infinity Mirror work. Treat as read-only until methods are understood. |
 
 ## Main Keyboard
 
-The visible whole-keyboard path is the `05af:866a` ff02 / commit33 flow.
+Two distinct hardware paths on the `05af:866a` controller, with different
+roles:
 
-Confirmed:
+| Path | What it does |
+| --- | --- |
+| ff02 commit33 (whole-board word writes) | **Flips firmware out of dynamic into a static frame.** Used by `set-main-keyboard-{blue,red,green}` and `set-keyboard-baseline`. The only known mode transition. |
+| `report84` + `report86=0x01` (per-index writes) | Modifies individual cells *within an existing static frame*. Inert on a keyboard that is still in dynamic mode. |
 
-- `ff0000ff` makes the main keyboard blue.
-- The hybrid restore flow can set the main keyboard plus MagKeys blue.
+### Confirmed ff02 commit33 words
 
-Observed caveats:
+The 4-byte word inside the 64-byte ff02 frame is not a conventional RGB
+encoding. Known-working words on this unit:
 
-- The old `report84` per-key path accepts writes but does not visibly latch.
-- `report86=1` returns the keyboard to firmware dynamic/default behavior.
-- `report86=0` behaved statefully in testing; in the latest run it restored blue rather than acting as a reliable blackout.
-- Early red/green labels were misleading:
-  - `00ff0000` produced an off/blackout-like result.
-  - `0000ff00` produced red-ish main keyboard output while MagKeys stayed off.
+| Visible color | Word |
+| --- | --- |
+| Blue | `ff 00 00 ff` |
+| Red-ish | `00 00 ff 00` |
+| Green | `00 00 00 ff` |
+| Off | `00 00 00 00` |
+
+`set-keyboard-baseline --color {off,blue,red,green}` exposes these. Arbitrary
+RGB baselines via the ff02 path are not understood.
+
+### `report86` semantics (from research probes)
+
+- `[0x86, 0x00]` standalone → full keyboard blackout. Also clears any pending
+  `report84` buffer, so it must not be sent between `report84` and the commit.
+- `[0x86, 0x01]` standalone → "return to default dynamic pattern."
+- `[0x86, 0x01]` immediately after a `report84` → commits the pending per-key
+  change against the current static frame.
+
+The daemon never sends `[0x86, 0x00]` in the per-key write loop; doing so was
+the original bug that made per-key writes appear to revert to dynamic.
+
+### Stubborn indices
+
+After an ff02 commit33 sweep, four indices on this unit do not pick up the
+baseline color cleanly and need an explicit `report84` follow-up at the
+baseline RGB:
+
+- 25 (digit 5)
+- 66 (semicolon)
+- 71 (keypad 6)
+- 98 (arrow down)
+
+The daemon repaints these every time it runs a full repaint, unless the user
+has explicitly overridden them.
 
 ## MagKey 3.0
 
-The visible MagKey path is `05af:866a` ff02 with an init, 64-byte LED map, and commit.
+The visible MagKey path is `05af:866a` ff02 with an init prelude, a 64-byte
+LED map, and a commit packet (`08 02 4f 05 32 08 01 66`).
 
 Confirmed:
 
-- All red works.
-- All green works.
-- All blue works.
-- All off works.
-- Split colors work with caveats.
+- All red / green / blue / off.
+- Per-key whole-key presets (`set-magkey-whole-key`).
+- Per-zone (`left` / `top` / `right`) RGB within a key (`set-magkey-zones`).
 
 Known caveat:
 
-- A/S/D share slots in ways that can cause color bleed, especially when blue is involved. The safe mode intentionally sacrifices some blue behavior to reduce bleed.
+- A/S/D share slots in ways that can cause color bleed, especially when blue
+  is involved. `--safe-magkeys` on the older pattern commands intentionally
+  sacrifices some blue behavior to reduce bleed; the verified frame model
+  used by the current commands generally avoids it.
 
 ## Cover Logo
 
-The visible Cover Logo path is HID `0d62:ba51`, but it is currently being re-verified in the public app workflow rather than treated as settled.
+HID `0d62:ba51`, short feature/output packets.
 
 Confirmed:
 
-- Brightness control works.
-- Whole-logo red, green, and blue work.
-- Left segment works.
-- Middle segment works, but segments visually blend.
-- Right segment is likely correct, but one test was not isolated because it may already have been blue.
+- Whole-logo red / green / blue.
+- Left / middle / right segments (note: segments visually blend on this
+  hardware).
+- Brightness 0-100.
+
+The daemon attempts four transport variants per write
+(`feature_prefixed`, `feature_raw`, `output_prefixed`, `output_raw`); at least
+one succeeds.
 
 ## Not Useful So Far
 
-`report 0x5A` group writes are accepted by the HID device but have not produced useful visible RGB changes on tested surfaces.
-
-Treat `report 0x5A` as low priority unless new evidence appears.
+- `report 0x5A` group zones — HID accepts writes, no visible effect on the
+  tested surfaces.
 
 ## Still Unknown
 
-- Base Logo
-- Infinity Mirror
-- Reliable main-keyboard red/green/white words for the ff02 commit33 path
-- Per-key visible latch/source-select behavior
-
-## What To Bring From Research Into This Repo
-
-Bring:
-
-- Confirmed controller IDs.
-- Confirmed semantic behavior.
-- Clean packet-builder code once implemented in Rust.
-- Small non-hardware tests for packet builders.
-
-Do not bring:
-
-- `.pcapng` captures.
-- USBPcap logs.
-- Screenshots from PredatorSense.
-- Imported experimental repos.
-- Large command-output logs.
-- Scripts that blindly sweep hardware packets.
+- Base Logo path.
+- Infinity Mirror path.
+- A general formula for ff02 commit33 words at arbitrary RGB (only the four
+  baseline words above are confirmed).

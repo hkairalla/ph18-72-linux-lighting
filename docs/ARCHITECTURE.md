@@ -1,11 +1,11 @@
 # Architecture
 
-Hardware access should stay behind a daemon boundary.
+Hardware access stays behind a daemon boundary.
 
 ```text
-QML UI
-  -> Python / PySide6 app
-  -> Rust daemon
+PyWebView UI (HTML/CSS/JS in app/src/ph18_72_lighting_ui/ui/)
+  -> Python shell (pywebview, app/src/ph18_72_lighting_ui/main.py)
+  -> Rust daemon CLI (daemon/, invoked per-command via subprocess)
   -> HID and future WMI/ACPI hardware backends
 ```
 
@@ -13,117 +13,107 @@ QML UI
 
 | Layer | Responsibility |
 | --- | --- |
-| QML | Future visual controls, color pickers, zone layout, presets, status display. |
-| Python / PySide6 | Future app shell, tray/menu integration, user settings, D-Bus client, QML model binding. |
-| Rust daemon | Device discovery, permissions, HID writes, future WMI/ACPI probes, profile application, safety checks. |
+| Web UI | Visual controls, color pickers, zone layout, presets, command output history. |
+| Python shell | App entry, daemon process invocation, command result plumbing. |
+| Rust daemon | Device discovery, HID writes, persistent keyboard state, packet construction. |
 | Hardware backends | `/dev/hidraw*`, `/sys`, and possibly WMI/ACPI for unresolved lighting surfaces. |
 
 ## Boundary Rule
 
-The UI should request semantic operations:
+The UI requests semantic operations through daemon CLI commands:
 
-- `SetMagKeys`
-- `SetCoverLogo`
-- `SetMainKeyboardColor`
-- `RestoreKnownGood`
+- `set-keyboard-baseline --color {off,blue,red,green}`
+- `set-keyboard-key --key K --red R --green G --blue B`
+- `clear-keyboard-key --key K`
+- `reset-keyboard`
+- `get-keyboard-state`
+- `set-magkey-key`, `set-magkey-whole-key`, `set-magkeys-pattern`, `set-magkey-zones`
+- `set-cover-logo --segment {left,middle,right}`
+- `set-cover-logo-brightness --level 0..100`
+- `inventory`
 
-The UI should not know raw packet bytes. Packet construction belongs in the daemon.
+The UI does not know raw packet bytes. Packet construction belongs in the
+daemon.
 
-## Controller Triage First
+## Daemon-Side State
 
-The daemon should inventory available controller paths before running mutating lighting commands.
+The daemon keeps a small persisted state file at
+`~/.cache/ph18-lighting/keyboard-state`:
+
+```text
+baseline=blue
+override=39:255,0,0
+override=41:0,255,0
+```
+
+Every keyboard command performs a full-board repaint:
+
+1. ff02 commit33 sweep with the current baseline word.
+2. `report82` + `report86=1` to anchor the baseline RGB on stubborn cells.
+3. `report84` + `report86=1` for each per-key override.
+
+This is required because per-key writes are inert against the firmware's
+default dynamic mode. See [PROTOCOL_NOTES.md](PROTOCOL_NOTES.md).
+
+## Controller Triage
+
+The daemon inventories available controller paths before mutating commands:
 
 | Path | Current Use |
 | --- | --- |
-| HID `05af:866a` | Main keyboard and MagKey testing first. |
-| HID `0d62:ba51` | Cover Logo testing first. |
-| Acer WMI/ACPI | Read-only triage for Base Logo / Infinity Mirror. |
+| HID `05af:866a` | Main keyboard (ff02 + `report82/84/86`) and MagKey (ff02 LED-map). |
+| HID `0d62:ba51` | Cover Logo. |
+| Acer WMI/ACPI | Read-only triage for Base Logo / Infinity Mirror. Not yet wired up. |
 | Kernel LED class | Usually brightness/status only, not RGB. |
 | Platform profile | Performance/fan mode, not direct RGB color. |
 
-The frontend should use this inventory result to mark unsupported or unknown surfaces instead of blindly issuing commands.
-
 ## Build Phases
 
-Build this in narrow layers so each new confirmed command can slot into the daemon without rewriting the stack.
+This stack is built in narrow layers so each new confirmed command can slot
+into the daemon without rewriting everything above it.
 
-### Phase 1: Rust CLI First
+### Phase 1 — Rust CLI (current)
 
-Start with a Rust CLI that wraps only confirmed behavior:
+The Rust CLI wraps confirmed behavior:
 
 - `inventory`
-- `set-magkeys`
-- `set-cover-logo`
-- `set-main-keyboard-blue`
-- `restore-known-good`
+- `set-keyboard-baseline`, `set-keyboard-key`, `clear-keyboard-key`,
+  `reset-keyboard`, `get-keyboard-state`, `set-main-keyboard-{blue,red,green}`
+- `set-magkeys` family (whole / pattern / per-key / per-zone)
+- `set-cover-logo` and `set-cover-logo-brightness`
 
-Why:
+### Phase 2 — Testing UI (current)
 
-- Fastest path to a stable hardware boundary.
-- Easy to add new commands as we discover them.
-- Lets us keep all packet construction in one place.
-- Gives us something testable before we add IPC or UI.
+A small PyWebView HTML/CSS/JS UI sits on top of the CLI for hands-on testing.
+It is intentionally utilitarian: panels per surface, command/output history,
+and a keyboard grid that maps to daemon commands. It is not the final app
+shell.
 
-### Phase 2: Simple Testing UI
+### Phase 3 — Long-running daemon + IPC (future)
 
-Build a very small PySide6/QML testing UI after the CLI can drive known surfaces.
-
-The testing UI should be intentionally utilitarian:
-
-- buttons for known-good commands
-- color controls for MagKeys and Cover Logo
-- a status panel that shows detected controllers
-- a manual command surface only for known-safe operations
-
-This UI should call the Rust layer through a stable interface, not reimplement packet logic.
-
-### Phase 3: Daemon + IPC
-
-Once the command model feels stable, promote the Rust backend into a long-running daemon and expose D-Bus methods.
-
-At that point the UI becomes a real app instead of a test harness.
-
-### Phase 4: Unknown Surface Research
-
-Only after the basic stack is stable should we add:
-
-- Base Logo investigation
-- Infinity Mirror investigation
-- WMI/ACPI read-only probes
-- new packet families
-
-That keeps risky discovery work from destabilizing the known-good commands.
-
-## Recommended Approach
-
-The best path is:
-
-1. Build the real Rust command layer now.
-2. Add a small testing UI on top of that real command layer.
-3. Grow the daemon/API from the same code, instead of building a throwaway test stack.
-
-That gives us one hardware implementation and one gradual path upward. Each newly discovered command becomes:
-
-- a Rust packet builder/backend method
-- a CLI command
-- optionally a test UI control
-- later a daemon/API method
-
-This is the cleanest way to keep momentum without duplicating logic.
-
-## IPC
-
-Use D-Bus for the first production interface once daemon operations are implemented:
+Once the command model feels stable, promote the Rust backend into a
+long-running daemon and expose D-Bus methods. Suggested names:
 
 - System daemon: `org.ph18.Lighting`
 - Object path: `/org/ph18/Lighting`
 - Interface: `org.ph18.Lighting1`
 
-The daemon can also expose a CLI for debugging and packaging smoke tests.
+The CLI stays around for debugging and packaging smoke tests.
+
+### Phase 4 — Unknown surface research (future)
+
+Only after the basic stack is stable:
+
+- Base Logo investigation
+- Infinity Mirror investigation
+- WMI/ACPI read-only probes
+- New packet families
+
+This keeps risky discovery work from destabilizing the known-good commands.
 
 ## Safety
 
-- Do not run the GUI as root.
-- Keep all privileged hardware access in the daemon.
-- Validate RGB ranges and surface names in the daemon.
-- Keep unknown WMI/ACPI probing read-only until a method is understood.
+- The UI does not run as root.
+- All privileged hardware access stays in the daemon.
+- The daemon validates surface names and RGB ranges.
+- Unknown WMI/ACPI probing should stay read-only until a method is understood.
