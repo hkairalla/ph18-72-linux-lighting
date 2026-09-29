@@ -493,11 +493,21 @@ body {
 
 .key-labels text {
   fill: rgba(0,196,222,0.20);
+  pointer-events: none;
   font-size: 22px;
   font-weight: 700;
   font-family: var(--font);
   text-anchor: middle;
   dominant-baseline: middle;
+}
+
+/* Lit key letter: filled (and softly outlined) with a gradient across the key's
+   zone colors; the gradient itself is set from JS. */
+.key-labels text.lit {
+  stroke-opacity: 0.35;
+  stroke-width: 5;
+  stroke-linejoin: round;
+  paint-order: stroke;
 }
 
 /* Halo: five stacked translucent strokes (five: wide+faint to narrow+strong) fake a
@@ -514,21 +524,34 @@ body {
 .zone-halos .halo.lit polygon:nth-child(4) { stroke: rgb(var(--hc) / 0.080); stroke-width: 11; }
 .zone-halos .halo.lit polygon:nth-child(5) { stroke: rgb(var(--hc) / 0.110); stroke-width: 6; }
 /* Each key is split into three zones (top wedge, lower-left, lower-right).
-   JS fills the polygon with the zone's color and puts a glow on the group. */
-.emitter polygon {
-  fill: rgba(13,24,37,0.55);
-  stroke: transparent;   /* no divider: zones only show through their fill */
+   Same look as the keyboard page: a muted body, and the color carried by the
+   outline, glow and letter. The art for a zone is the whole key, masked by
+   soft ramps along the Y (see the <mask>s in index.html), so neighboring zone
+   colors crossfade where they meet. --zc is "r g b". */
+.emitter .zone-art { pointer-events: none; }
+.emitter .zone-body  { fill: transparent; }
+.emitter .zone-inner,
+.emitter .zone-edge  { fill: none; stroke: transparent; }
+.emitter.lit .zone-body  { fill: rgb(var(--zc) / 0.13); }
+.emitter.lit .zone-inner { stroke: rgb(var(--zc) / 0.20); stroke-width: 10; }
+.emitter.lit .zone-edge  { stroke: rgb(var(--zc) / 0.92); stroke-width: 2; }
+
+/* The click target is an invisible polygon over the zone; it also draws the
+   hover and selected outlines. */
+.emitter .zone-hit {
+  fill: transparent;
+  stroke: transparent;
   stroke-width: 1.5;
   cursor: pointer;
   transition: stroke 0.1s, stroke-width 0.1s;
 }
-.emitter:hover polygon {
+.emitter:hover .zone-hit {
   stroke: rgba(0,196,222,0.6);
   stroke-width: 2;
 }
-.emitter.selected polygon {
-  stroke: #fff;
-  stroke-width: 3;
+.emitter.selected .zone-hit {
+  stroke: rgba(255,255,255,0.85);
+  stroke-width: 2;
 }
 
 /* ── Keyboard grid ─────────────────────────────────────────────────── */

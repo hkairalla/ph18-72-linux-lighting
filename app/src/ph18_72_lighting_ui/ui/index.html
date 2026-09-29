@@ -82,6 +82,60 @@
                 <clipPath id="clip-a"><rect x="28" y="140" width="84" height="88" rx="10"/></clipPath>
                 <clipPath id="clip-s"><rect x="148" y="140" width="84" height="88" rx="10"/></clipPath>
                 <clipPath id="clip-d"><rect x="268" y="140" width="84" height="88" rx="10"/></clipPath>
+                <!-- Key letters: gradient across the key's left / top / right zone colors -->
+                <linearGradient id="klg-w" x1="0" y1="0" x2="1" y2="0"><stop id="kls-w-0" offset="0"/><stop id="kls-w-1" offset="0.5"/><stop id="kls-w-2" offset="1"/></linearGradient>
+                <linearGradient id="klg-a" x1="0" y1="0" x2="1" y2="0"><stop id="kls-a-0" offset="0"/><stop id="kls-a-1" offset="0.5"/><stop id="kls-a-2" offset="1"/></linearGradient>
+                <linearGradient id="klg-s" x1="0" y1="0" x2="1" y2="0"><stop id="kls-s-0" offset="0"/><stop id="kls-s-1" offset="0.5"/><stop id="kls-s-2" offset="1"/></linearGradient>
+                <linearGradient id="klg-d" x1="0" y1="0" x2="1" y2="0"><stop id="kls-d-0" offset="0"/><stop id="kls-d-1" offset="0.5"/><stop id="kls-d-2" offset="1"/></linearGradient>
+                <!-- Soft zone masks: crossfading ramps along the Y so zone colors blend where they meet -->
+                <linearGradient id="gL-w" gradientUnits="userSpaceOnUse" x1="145.5" y1="83.79" x2="154.5" y2="68.21"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mL-w" maskUnits="userSpaceOnUse" x="78" y="2" width="144" height="148"><rect x="78" y="2" width="144" height="148" fill="url(#gL-w)"/></mask>
+                <linearGradient id="gLi-w" gradientUnits="userSpaceOnUse" x1="154.5" y1="68.21" x2="145.5" y2="83.79"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mLi-w" maskUnits="userSpaceOnUse" x="78" y="2" width="144" height="148"><rect x="78" y="2" width="144" height="148" fill="url(#gLi-w)"/></mask>
+                <linearGradient id="gR-w" gradientUnits="userSpaceOnUse" x1="154.5" y1="83.79" x2="145.5" y2="68.21"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mR-w" maskUnits="userSpaceOnUse" x="78" y="2" width="144" height="148"><rect x="78" y="2" width="144" height="148" fill="url(#gR-w)"/></mask>
+                <linearGradient id="gRi-w" gradientUnits="userSpaceOnUse" x1="145.5" y1="68.21" x2="154.5" y2="83.79"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mRi-w" maskUnits="userSpaceOnUse" x="78" y="2" width="144" height="148"><rect x="78" y="2" width="144" height="148" fill="url(#gRi-w)"/></mask>
+                <linearGradient id="gV-w" gradientUnits="userSpaceOnUse" x1="141" y1="76" x2="159" y2="76"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mV-w" maskUnits="userSpaceOnUse" x="78" y="2" width="144" height="148"><rect x="78" y="2" width="144" height="148" fill="url(#gV-w)"/></mask>
+                <linearGradient id="gVi-w" gradientUnits="userSpaceOnUse" x1="159" y1="76" x2="141" y2="76"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mVi-w" maskUnits="userSpaceOnUse" x="78" y="2" width="144" height="148"><rect x="78" y="2" width="144" height="148" fill="url(#gVi-w)"/></mask>
+                <linearGradient id="gL-a" gradientUnits="userSpaceOnUse" x1="65.5" y1="191.79" x2="74.5" y2="176.21"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mL-a" maskUnits="userSpaceOnUse" x="-2" y="110" width="144" height="148"><rect x="-2" y="110" width="144" height="148" fill="url(#gL-a)"/></mask>
+                <linearGradient id="gLi-a" gradientUnits="userSpaceOnUse" x1="74.5" y1="176.21" x2="65.5" y2="191.79"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mLi-a" maskUnits="userSpaceOnUse" x="-2" y="110" width="144" height="148"><rect x="-2" y="110" width="144" height="148" fill="url(#gLi-a)"/></mask>
+                <linearGradient id="gR-a" gradientUnits="userSpaceOnUse" x1="74.5" y1="191.79" x2="65.5" y2="176.21"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mR-a" maskUnits="userSpaceOnUse" x="-2" y="110" width="144" height="148"><rect x="-2" y="110" width="144" height="148" fill="url(#gR-a)"/></mask>
+                <linearGradient id="gRi-a" gradientUnits="userSpaceOnUse" x1="65.5" y1="176.21" x2="74.5" y2="191.79"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mRi-a" maskUnits="userSpaceOnUse" x="-2" y="110" width="144" height="148"><rect x="-2" y="110" width="144" height="148" fill="url(#gRi-a)"/></mask>
+                <linearGradient id="gV-a" gradientUnits="userSpaceOnUse" x1="61" y1="184" x2="79" y2="184"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mV-a" maskUnits="userSpaceOnUse" x="-2" y="110" width="144" height="148"><rect x="-2" y="110" width="144" height="148" fill="url(#gV-a)"/></mask>
+                <linearGradient id="gVi-a" gradientUnits="userSpaceOnUse" x1="79" y1="184" x2="61" y2="184"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mVi-a" maskUnits="userSpaceOnUse" x="-2" y="110" width="144" height="148"><rect x="-2" y="110" width="144" height="148" fill="url(#gVi-a)"/></mask>
+                <linearGradient id="gL-s" gradientUnits="userSpaceOnUse" x1="185.5" y1="191.79" x2="194.5" y2="176.21"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mL-s" maskUnits="userSpaceOnUse" x="118" y="110" width="144" height="148"><rect x="118" y="110" width="144" height="148" fill="url(#gL-s)"/></mask>
+                <linearGradient id="gLi-s" gradientUnits="userSpaceOnUse" x1="194.5" y1="176.21" x2="185.5" y2="191.79"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mLi-s" maskUnits="userSpaceOnUse" x="118" y="110" width="144" height="148"><rect x="118" y="110" width="144" height="148" fill="url(#gLi-s)"/></mask>
+                <linearGradient id="gR-s" gradientUnits="userSpaceOnUse" x1="194.5" y1="191.79" x2="185.5" y2="176.21"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mR-s" maskUnits="userSpaceOnUse" x="118" y="110" width="144" height="148"><rect x="118" y="110" width="144" height="148" fill="url(#gR-s)"/></mask>
+                <linearGradient id="gRi-s" gradientUnits="userSpaceOnUse" x1="185.5" y1="176.21" x2="194.5" y2="191.79"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mRi-s" maskUnits="userSpaceOnUse" x="118" y="110" width="144" height="148"><rect x="118" y="110" width="144" height="148" fill="url(#gRi-s)"/></mask>
+                <linearGradient id="gV-s" gradientUnits="userSpaceOnUse" x1="181" y1="184" x2="199" y2="184"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mV-s" maskUnits="userSpaceOnUse" x="118" y="110" width="144" height="148"><rect x="118" y="110" width="144" height="148" fill="url(#gV-s)"/></mask>
+                <linearGradient id="gVi-s" gradientUnits="userSpaceOnUse" x1="199" y1="184" x2="181" y2="184"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mVi-s" maskUnits="userSpaceOnUse" x="118" y="110" width="144" height="148"><rect x="118" y="110" width="144" height="148" fill="url(#gVi-s)"/></mask>
+                <linearGradient id="gL-d" gradientUnits="userSpaceOnUse" x1="305.5" y1="191.79" x2="314.5" y2="176.21"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mL-d" maskUnits="userSpaceOnUse" x="238" y="110" width="144" height="148"><rect x="238" y="110" width="144" height="148" fill="url(#gL-d)"/></mask>
+                <linearGradient id="gLi-d" gradientUnits="userSpaceOnUse" x1="314.5" y1="176.21" x2="305.5" y2="191.79"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mLi-d" maskUnits="userSpaceOnUse" x="238" y="110" width="144" height="148"><rect x="238" y="110" width="144" height="148" fill="url(#gLi-d)"/></mask>
+                <linearGradient id="gR-d" gradientUnits="userSpaceOnUse" x1="314.5" y1="191.79" x2="305.5" y2="176.21"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mR-d" maskUnits="userSpaceOnUse" x="238" y="110" width="144" height="148"><rect x="238" y="110" width="144" height="148" fill="url(#gR-d)"/></mask>
+                <linearGradient id="gRi-d" gradientUnits="userSpaceOnUse" x1="305.5" y1="176.21" x2="314.5" y2="191.79"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mRi-d" maskUnits="userSpaceOnUse" x="238" y="110" width="144" height="148"><rect x="238" y="110" width="144" height="148" fill="url(#gRi-d)"/></mask>
+                <linearGradient id="gV-d" gradientUnits="userSpaceOnUse" x1="301" y1="184" x2="319" y2="184"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mV-d" maskUnits="userSpaceOnUse" x="238" y="110" width="144" height="148"><rect x="238" y="110" width="144" height="148" fill="url(#gV-d)"/></mask>
+                <linearGradient id="gVi-d" gradientUnits="userSpaceOnUse" x1="319" y1="184" x2="301" y2="184"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+                <mask id="mVi-d" maskUnits="userSpaceOnUse" x="238" y="110" width="144" height="148"><rect x="238" y="110" width="144" height="148" fill="url(#gVi-d)"/></mask>
               </defs>
 
               <!-- Zone halos: wide translucent strokes behind the zones stand in for a blur
@@ -113,28 +167,28 @@
               <!-- Zones: each key is split into thirds (top wedge, lower-left, lower-right).
                    em-N are the click targets and get colored by setEmitterSvg(). -->
               <!-- W -->
-              <g class="emitter" id="em-0" data-key="w" data-zone="left" data-idx="0"><title>W · Left</title><polygon points="150,76 108,51.8 108,120 150,120" clip-path="url(#clip-w)"/></g>
-              <g class="emitter" id="em-1" data-key="w" data-zone="top" data-idx="1"><title>W · Top</title><polygon points="150,76 192,51.8 192,32 108,32 108,51.8" clip-path="url(#clip-w)"/></g>
-              <g class="emitter" id="em-2" data-key="w" data-zone="right" data-idx="2"><title>W · Right</title><polygon points="150,76 150,120 192,120 192,51.8" clip-path="url(#clip-w)"/></g>
+              <g class="emitter" id="em-0" data-key="w" data-zone="left" data-idx="0"><title>W · Left</title><g class="zone-art" mask="url(#mLi-w)"><g mask="url(#mVi-w)"><rect class="zone-body" x="108" y="32" width="84" height="88" rx="10"/><rect class="zone-inner" x="109" y="33" width="82" height="86" rx="9"/><rect class="zone-edge" x="109" y="33" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="150,76 108,51.8 108,120 150,120" clip-path="url(#clip-w)"/></g>
+              <g class="emitter" id="em-1" data-key="w" data-zone="top" data-idx="1"><title>W · Top</title><g class="zone-art" mask="url(#mL-w)"><g mask="url(#mR-w)"><rect class="zone-body" x="108" y="32" width="84" height="88" rx="10"/><rect class="zone-inner" x="109" y="33" width="82" height="86" rx="9"/><rect class="zone-edge" x="109" y="33" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="150,76 192,51.8 192,32 108,32 108,51.8" clip-path="url(#clip-w)"/></g>
+              <g class="emitter" id="em-2" data-key="w" data-zone="right" data-idx="2"><title>W · Right</title><g class="zone-art" mask="url(#mV-w)"><g mask="url(#mRi-w)"><rect class="zone-body" x="108" y="32" width="84" height="88" rx="10"/><rect class="zone-inner" x="109" y="33" width="82" height="86" rx="9"/><rect class="zone-edge" x="109" y="33" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="150,76 150,120 192,120 192,51.8" clip-path="url(#clip-w)"/></g>
               <!-- A -->
-              <g class="emitter" id="em-3" data-key="a" data-zone="left" data-idx="3"><title>A · Left</title><polygon points="70,184 28,159.8 28,228 70,228" clip-path="url(#clip-a)"/></g>
-              <g class="emitter" id="em-4" data-key="a" data-zone="top" data-idx="4"><title>A · Top</title><polygon points="70,184 112,159.8 112,140 28,140 28,159.8" clip-path="url(#clip-a)"/></g>
-              <g class="emitter" id="em-5" data-key="a" data-zone="right" data-idx="5"><title>A · Right</title><polygon points="70,184 70,228 112,228 112,159.8" clip-path="url(#clip-a)"/></g>
+              <g class="emitter" id="em-3" data-key="a" data-zone="left" data-idx="3"><title>A · Left</title><g class="zone-art" mask="url(#mLi-a)"><g mask="url(#mVi-a)"><rect class="zone-body" x="28" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="29" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="29" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="70,184 28,159.8 28,228 70,228" clip-path="url(#clip-a)"/></g>
+              <g class="emitter" id="em-4" data-key="a" data-zone="top" data-idx="4"><title>A · Top</title><g class="zone-art" mask="url(#mL-a)"><g mask="url(#mR-a)"><rect class="zone-body" x="28" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="29" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="29" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="70,184 112,159.8 112,140 28,140 28,159.8" clip-path="url(#clip-a)"/></g>
+              <g class="emitter" id="em-5" data-key="a" data-zone="right" data-idx="5"><title>A · Right</title><g class="zone-art" mask="url(#mV-a)"><g mask="url(#mRi-a)"><rect class="zone-body" x="28" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="29" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="29" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="70,184 70,228 112,228 112,159.8" clip-path="url(#clip-a)"/></g>
               <!-- S -->
-              <g class="emitter" id="em-6" data-key="s" data-zone="left" data-idx="6"><title>S · Left</title><polygon points="190,184 148,159.8 148,228 190,228" clip-path="url(#clip-s)"/></g>
-              <g class="emitter" id="em-7" data-key="s" data-zone="top" data-idx="7"><title>S · Top</title><polygon points="190,184 232,159.8 232,140 148,140 148,159.8" clip-path="url(#clip-s)"/></g>
-              <g class="emitter" id="em-8" data-key="s" data-zone="right" data-idx="8"><title>S · Right</title><polygon points="190,184 190,228 232,228 232,159.8" clip-path="url(#clip-s)"/></g>
+              <g class="emitter" id="em-6" data-key="s" data-zone="left" data-idx="6"><title>S · Left</title><g class="zone-art" mask="url(#mLi-s)"><g mask="url(#mVi-s)"><rect class="zone-body" x="148" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="149" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="149" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="190,184 148,159.8 148,228 190,228" clip-path="url(#clip-s)"/></g>
+              <g class="emitter" id="em-7" data-key="s" data-zone="top" data-idx="7"><title>S · Top</title><g class="zone-art" mask="url(#mL-s)"><g mask="url(#mR-s)"><rect class="zone-body" x="148" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="149" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="149" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="190,184 232,159.8 232,140 148,140 148,159.8" clip-path="url(#clip-s)"/></g>
+              <g class="emitter" id="em-8" data-key="s" data-zone="right" data-idx="8"><title>S · Right</title><g class="zone-art" mask="url(#mV-s)"><g mask="url(#mRi-s)"><rect class="zone-body" x="148" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="149" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="149" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="190,184 190,228 232,228 232,159.8" clip-path="url(#clip-s)"/></g>
               <!-- D -->
-              <g class="emitter" id="em-9" data-key="d" data-zone="left" data-idx="9"><title>D · Left</title><polygon points="310,184 268,159.8 268,228 310,228" clip-path="url(#clip-d)"/></g>
-              <g class="emitter" id="em-10" data-key="d" data-zone="top" data-idx="10"><title>D · Top</title><polygon points="310,184 352,159.8 352,140 268,140 268,159.8" clip-path="url(#clip-d)"/></g>
-              <g class="emitter" id="em-11" data-key="d" data-zone="right" data-idx="11"><title>D · Right</title><polygon points="310,184 310,228 352,228 352,159.8" clip-path="url(#clip-d)"/></g>
+              <g class="emitter" id="em-9" data-key="d" data-zone="left" data-idx="9"><title>D · Left</title><g class="zone-art" mask="url(#mLi-d)"><g mask="url(#mVi-d)"><rect class="zone-body" x="268" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="269" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="269" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="310,184 268,159.8 268,228 310,228" clip-path="url(#clip-d)"/></g>
+              <g class="emitter" id="em-10" data-key="d" data-zone="top" data-idx="10"><title>D · Top</title><g class="zone-art" mask="url(#mL-d)"><g mask="url(#mR-d)"><rect class="zone-body" x="268" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="269" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="269" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="310,184 352,159.8 352,140 268,140 268,159.8" clip-path="url(#clip-d)"/></g>
+              <g class="emitter" id="em-11" data-key="d" data-zone="right" data-idx="11"><title>D · Right</title><g class="zone-art" mask="url(#mV-d)"><g mask="url(#mRi-d)"><rect class="zone-body" x="268" y="140" width="84" height="88" rx="10"/><rect class="zone-inner" x="269" y="141" width="82" height="86" rx="9"/><rect class="zone-edge" x="269" y="141" width="82" height="86" rx="9"/></g></g><polygon class="zone-hit" points="310,184 310,228 352,228 352,159.8" clip-path="url(#clip-d)"/></g>
 
               <!-- Key labels -->
               <g class="key-labels">
-                <text x="150" y="80">W</text>
-                <text x="70"  y="185">A</text>
-                <text x="190" y="185">S</text>
-                <text x="310" y="185">D</text>
+                <text id="kl-w" x="150" y="80">W</text>
+                <text id="kl-a" x="70"  y="185">A</text>
+                <text id="kl-s" x="190" y="185">S</text>
+                <text id="kl-d" x="310" y="185">D</text>
               </g>
 
             </svg>

@@ -343,13 +343,41 @@ function setEmitterSvg(idx, r, g, b) {
   const el = document.getElementById(`em-${idx}`);
   if (!el) return;
   const dark = r < 15 && g < 15 && b < 15;
-  el.querySelector('polygon').style.fill = dark ? '' : `rgb(${r} ${g} ${b} / 0.62)`;
-  // The halo sits behind the zones, unclipped, so it spills past the key edge.
+  // Same language as the keyboard page: a muted body, with the color carried
+  // by the outline, the glow and the letter. --zc is "r g b".
+  el.classList.toggle('lit', !dark);
+  el.dataset.rgb = dark ? '' : `${r},${g},${b}`;
+  if (!dark) el.style.setProperty('--zc', `${r} ${g} ${b}`);
+  // The halo sits behind the key bodies, unclipped, so it spills past the edge.
   const halo = document.getElementById(`gl-${idx}`);
   if (halo) {
     halo.classList.toggle('lit', !dark);
     if (!dark) halo.style.setProperty('--hc', `${r} ${g} ${b}`);
   }
+  updateKeyLabel(el.dataset.key);
+}
+
+// The W/A/S/D letter is a gradient across the key's left / top / right zone
+// colors, so a multi-color key shows all of them and a single color stays flat.
+const ZONE_ORDER = ['left', 'top', 'right'];
+function updateKeyLabel(key) {
+  const label = document.getElementById(`kl-${key}`);
+  if (!label) return;
+  const zones = ZONE_ORDER.map(z => document.querySelector(`.emitter[data-key="${key}"][data-zone="${z}"]`));
+  const lit = zones.some(z => z && z.classList.contains('lit'));
+  label.classList.toggle('lit', lit);
+  label.style.fill = lit ? `url(#klg-${key})` : '';
+  label.style.stroke = lit ? `url(#klg-${key})` : '';
+  if (!lit) return;
+  zones.forEach((z, i) => {
+    const stop = document.getElementById(`kls-${key}-${i}`);
+    if (!stop) return;
+    const on = z && z.classList.contains('lit');
+    const [r, g, b] = on ? z.dataset.rgb.split(',').map(Number) : [40, 60, 75];
+    // Lift toward white a little so pure blues stay readable on the dark body.
+    const lift = c => Math.round(c + (255 - c) * 0.22);
+    stop.style.stopColor = on ? `rgb(${lift(r)} ${lift(g)} ${lift(b)})` : `rgb(${r} ${g} ${b})`;
+  });
 }
 function updateAllEmitterSvg() {
   state.emitterColors.forEach(([r,g,b], i) => setEmitterSvg(i, r, g, b));
