@@ -1,18 +1,16 @@
 [Unit]
-Description=Restore PH18-72 keyboard lighting on login
+Description=Restore PH18-72 keyboard and MagKey lighting on login
 # Run after the graphical session is up so the user has hidraw access via the
 # logind ACL applied by the project's udev rule (70-ph18-72-lighting.rules).
 After=graphical-session.target
 
 [Service]
 Type=oneshot
-# %h expands to the user's home directory. Override `ExecStart=` in a drop-in
-# (`systemctl --user edit ph18-lighting-restore.service`) if the daemon binary
-# lives somewhere else on your system.
-ExecStart=%h/.local/bin/ph18-lighting-daemon repaint-keyboard
-
-# Don't fail at boot if the hidraw node isn't ready yet — just exit.
-SuccessExitStatus=1
+# The script finds the daemon binary and retries while the USB device settles.
+# %h expands to the user's home directory; override ExecStart= in a drop-in
+# (`systemctl --user edit ph18-lighting-restore.service`) if the repo lives
+# somewhere else.
+ExecStart=%h/Projects/ph18-72-linux-lighting/scripts/ph18-lighting-resume --now
 
 [Install]
 WantedBy=graphical-session.target

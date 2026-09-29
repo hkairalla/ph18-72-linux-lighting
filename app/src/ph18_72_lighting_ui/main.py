@@ -176,9 +176,15 @@ class Api:
 
         baseline: list[int] | None = None
         overrides: dict[int, list[int]] = {}
+        magkeys: list[list[int]] | None = None
         for line in self._daemon_lines(["get-keyboard-state"]):
             if line.startswith("baseline_rgb="):
                 baseline = [int(v) for v in line.split("=", 1)[1].split(",")]
+            elif line.startswith("magkey="):
+                zone, _, rgb = line.split("=", 1)[1].partition(":")
+                if magkeys is None:
+                    magkeys = [[0, 0, 0] for _ in range(12)]
+                magkeys[int(zone)] = [int(v) for v in rgb.split(",")]
             elif line.startswith("override="):
                 index, _, rgb = line.split("=", 1)[1].partition(":")
                 overrides[int(index)] = [int(v) for v in rgb.split(",")]
@@ -186,10 +192,10 @@ class Api:
         # If the state command failed we know nothing: report no colors rather than
         # painting every key with an invented baseline.
         if baseline is None:
-            return {"baseline": None, "keys": {}}
+            return {"baseline": None, "keys": {}, "magkeys": None}
 
         keys = {name: overrides.get(index, baseline) for name, index in indices.items()}
-        return {"baseline": baseline, "keys": keys}
+        return {"baseline": baseline, "keys": keys, "magkeys": magkeys}
 
     # ── Direct HID frame send (animation loop) ────────────────────────
     def send_magkey_frame(self, emitters: list[list[int]]) -> str:

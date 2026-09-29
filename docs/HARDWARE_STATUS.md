@@ -43,10 +43,13 @@ in the UI is therefore smooth.
 See [PROTOCOL_NOTES.md](PROTOCOL_NOTES.md) for the byte-level encoding
 discovery and the probing methodology.
 
-## Known side effect
+## MagKeys and the ff02 sweep
 
-The ff02 channel is shared with the MagKey LED controller. Whole-board
-baseline changes also write into MagKey territory as a side effect,
-which can clobber MagKey colors. Per-key writes use the separate
-`report84` path and do not touch MagKeys. A future change will persist
-and restore MagKey state across ff02 anchors.
+The ff02 channel is shared with the MagKey LED controller, so every
+whole-board sweep (baseline, reset, repaint, login, resume) also wipes the
+MagKeys. The daemon therefore saves the last MagKey frame (12 zone colors) in
+the same state file as `magkey=<zone>:<r>,<g>,<b>` lines. Any MagKey command
+saves it, and `repaint_keyboard` re-sends it right after the sweep. Live
+animation frames from the UI bypass the daemon and are not saved on purpose.
+Per-key keyboard writes use the separate `report84` path and never touch the
+MagKeys.

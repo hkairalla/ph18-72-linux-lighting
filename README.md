@@ -102,7 +102,7 @@ firmware drops back to its own animation. A small user service watches
 systemd-logind for the wake-up signal and re-sends the saved colors:
 
 ```bash
-cargo build --release --manifest-path daemon/Cargo.toml
+cargo build --release --manifest-path daemon/Cargo.toml   # or the debug build
 cp packaging/ph18-lighting-resume.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now ph18-lighting-resume.service
@@ -117,23 +117,21 @@ immediately (handy for testing). The service expects the repo at
 ### Restore keyboard state on login (optional)
 
 The firmware reverts to its dynamic animation on cold boot. To replay your
-last `{baseline, overrides}` on graphical login, install the included
-systemd **user** service:
+last keyboard colors and MagKey (WASD) colors on graphical login, install the
+included systemd **user** service:
 
 ```bash
-# Make sure the daemon binary is on PATH at ~/.local/bin (or edit the
-# service's ExecStart to point wherever your binary lives).
-mkdir -p ~/.local/bin
-cp daemon/target/release/ph18-lighting-daemon ~/.local/bin/
-
 mkdir -p ~/.config/systemd/user
 cp packaging/ph18-lighting-restore.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now ph18-lighting-restore.service
 ```
 
-The service calls `ph18-lighting-daemon repaint-keyboard`, which re-emits the
-state file at `~/.cache/ph18-lighting/keyboard-state` without modifying it.
+The service runs `scripts/ph18-lighting-resume --now`, which finds the newest
+daemon build, retries while the USB device settles, and calls
+`repaint-keyboard`. That re-emits the state file at
+`~/.cache/ph18-lighting/keyboard-state` (baseline, per-key overrides and the
+saved MagKey colors) without modifying it.
 
 Make targets:
 

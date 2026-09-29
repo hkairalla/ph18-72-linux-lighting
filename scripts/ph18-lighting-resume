@@ -21,13 +21,18 @@ LOCK="${XDG_RUNTIME_DIR:-/tmp}/ph18-lighting-repaint.lock"
 
 log() { echo "[ph18-resume] $*"; }
 
+# Use the most recently built daemon, so a rebuild of either profile is picked
+# up (a stale release build would silently miss newer features).
 find_daemon() {
-  local c
+  local c best="" best_mtime=0 m
   for c in "$HOME/.local/bin/ph18-lighting-daemon" \
            "$REPO_ROOT/daemon/target/release/ph18-lighting-daemon" \
            "$REPO_ROOT/daemon/target/debug/ph18-lighting-daemon"; do
-    [[ -x "$c" ]] && { echo "$c"; return 0; }
+    [[ -x "$c" ]] || continue
+    m="$(stat -c %Y "$c")"
+    if (( m > best_mtime )); then best="$c"; best_mtime=$m; fi
   done
+  [[ -n "$best" ]] && { echo "$best"; return 0; }
   return 1
 }
 

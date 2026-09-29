@@ -318,19 +318,25 @@ async function refreshKeyColors() {
     if (seq !== keyColorSeq) return;
     if (!view || !view.keys) return;
     for (const [name, rgb] of Object.entries(view.keys)) paintKey(name, rgb);
+    // Saved MagKey colors. Skip while animating, and right after an apply (the
+    // answer may predate the save).
+    if (view.magkeys && !state.animRunning && Date.now() - (state.mkLastApplyMs || 0) > 1500) {
+      state.emitterColors = view.magkeys;
+      updateAllEmitterSvg();
+    }
   } catch (err) {
     console.warn('key color refresh failed', err);
   }
 }
 
 /* ── MagKey frame send (always sends full 12-emitter state) ──────────*/
-function sendMagkeyFrame(label) {
-  setStatus(label, 'busy');
-  api.send_magkey_frame(state.emitterColors).then(result => {
-    const ok = result === 'ok';
-    setStatus(label + (ok ? ' — ok' : ' — ' + result), ok ? 'ok' : 'err');
-    pushHistory({ ok, title: label, output: ok ? 'frame sent' : result });
-  });
+// Static MagKey colors go through the daemon so they are saved and survive the
+// keyboard sweep, sleep and reboot. (Live animation frames use the fast direct
+// path in Python instead and are deliberately not saved.)
+function sendMagkeyFrame(_label) {
+  state.mkLastApplyMs = Date.now();
+  const colors = state.emitterColors.flat().join(',');
+  return runDaemon(['set-magkey-emitters', '--colors', colors]);
 }
 
 /* ── MagKey helpers ──────────────────────────────────────────────────*/
@@ -429,7 +435,7 @@ function startAnim(mode) {
   requestAnimationFrame(animLoop);
 }
 
-function stopAnim() {
+async function stopAnim() {
   state.animRunning = false;
   state.animLastTs  = null;
   const btn = document.getElementById('btn-anim');
@@ -437,7 +443,10 @@ function stopAnim() {
   btn.classList.remove('running');
   state.emitterColors = Array.from({length:12}, () => [0,0,0]);
   updateAllEmitterSvg();
-  api.send_magkey_frame(state.emitterColors);
+  // Let an animation frame that is already in flight land first, so it cannot
+  // overwrite the "off" frame.
+  for (let i = 0; i < 20 && state.hidBusy; i++) await new Promise(r => setTimeout(r, 10));
+  sendMagkeyFrame('stop');
 }
 
 /* ── Slider helpers ──────────────────────────────────────────────────*/

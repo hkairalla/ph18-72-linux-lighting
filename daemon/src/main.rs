@@ -95,6 +95,12 @@ enum Command {
         #[arg(required = true)]
         keys: Vec<String>,
     },
+    /// Set all 12 MagKey zones at once and save them (36 comma-separated 0-255
+    /// values: R,G,B for W-left, W-top, W-right, A-left, ... D-right).
+    SetMagkeyEmitters {
+        #[arg(long)]
+        colors: String,
+    },
     /// Set MagKeys using a confirmed safe command shape.
     SetMagkeys {
         #[arg(long)]
@@ -193,6 +199,7 @@ fn main() {
         Command::ProbeKeyboardWord { word } => probe_keyboard_word(&word),
         Command::GetKeyboardState => get_keyboard_state(),
         Command::KeyboardKeyIndices { keys } => keyboard_key_indices(&keys),
+        Command::SetMagkeyEmitters { colors } => set_magkey_emitters(&colors),
         Command::SetMagkeys { all } => set_magkeys(all),
         Command::SetMagkeysPattern {
             w,
@@ -299,6 +306,10 @@ fn baseline_name(rgb: (u8, u8, u8)) -> String {
 struct KeyboardState {
     baseline_rgb: (u8, u8, u8),
     overrides: BTreeMap<u16, (u8, u8, u8)>,
+    /// Last MagKey (WASD) frame as 12 zone colors, in frame order (W L/T/R, A, S, D).
+    /// `None` until a MagKey command has run. The ff02 sweep wipes MagKeys, so
+    /// every repaint re-sends this after the sweep.
+    magkeys: Option<[(u8, u8, u8); 12]>,
 }
 
 impl Default for KeyboardState {
@@ -306,6 +317,7 @@ impl Default for KeyboardState {
         Self {
             baseline_rgb: (0, 0, 255),
             overrides: BTreeMap::new(),
+            magkeys: None,
         }
     }
 }
@@ -338,6 +350,15 @@ fn load_keyboard_state() -> KeyboardState {
             if let Ok(rgb) = parse_baseline_color(value) {
                 state.baseline_rgb = rgb;
             }
+        } else if let Some(rest) = line.strip_prefix("magkey=") {
+            // Format: magkey=<zone 0..11>:<r>,<g>,<b>
+            if let Some((zone_str, rgb_str)) = rest.split_once(':') {
+                if let (Ok(zone), Ok(rgb)) = (zone_str.parse::<usize>(), parse_rgb_csv(rgb_str)) {
+                    if zone < 12 {
+                        state.magkeys.get_or_insert([(0, 0, 0); 12])[zone] = rgb;
+                    }
+                }
+            }
         } else if let Some(rest) = line.strip_prefix("override=") {
             // Format: override=<index>:<r>,<g>,<b>
             if let Some((index_str, rgb_str)) = rest.split_once(':') {
@@ -360,6 +381,11 @@ fn save_keyboard_state(state: &KeyboardState) -> io::Result<()> {
     buf.push_str(&format!("baseline={br},{bg},{bb}\n"));
     for (index, &(r, g, b)) in &state.overrides {
         buf.push_str(&format!("override={index}:{r},{g},{b}\n"));
+    }
+    if let Some(magkeys) = &state.magkeys {
+        for (zone, &(r, g, b)) in magkeys.iter().enumerate() {
+            buf.push_str(&format!("magkey={zone}:{r},{g},{b}\n"));
+        }
     }
     // Write to a sibling tmp file then rename so a partial write can't corrupt state.
     let tmp = path.with_extension("tmp");
@@ -425,6 +451,10 @@ fn repaint_keyboard(state: &KeyboardState) -> io::Result<(PathBuf, PathBuf)> {
 
     for (&index, &rgb) in &state.overrides {
         paint_index_via_report84(&vendor, index, rgb)?;
+    }
+    // The sweep above wipes the MagKeys (shared ff02 channel): put them back.
+    if let Some(magkeys) = &state.magkeys {
+        apply_magkey_frame_raw(&build_magkey_frame(magkeys))?;
     }
     Ok((ff02, vendor))
 }
@@ -622,6 +652,11 @@ fn get_keyboard_state() -> io::Result<()> {
     for (index, &(r, g, b)) in &state.overrides {
         println!("override={index}:{r},{g},{b}");
     }
+    if let Some(magkeys) = &state.magkeys {
+        for (zone, &(r, g, b)) in magkeys.iter().enumerate() {
+            println!("magkey={zone}:{r},{g},{b}");
+        }
+    }
     Ok(())
 }
 
@@ -632,6 +667,33 @@ fn keyboard_key_indices(keys: &[String]) -> io::Result<()> {
             None => println!("{key}=none"),
         }
     }
+    Ok(())
+}
+
+fn set_magkey_emitters(colors: &str) -> io::Result<()> {
+    let values = colors
+        .split(',')
+        .map(|v| v.trim().parse::<u8>())
+        .collect::<Result<Vec<u8>, _>>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "colors must be 0-255 integers"))?;
+    if values.len() != 36 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("expected 36 values (12 zones x R,G,B), got {}", values.len()),
+        ));
+    }
+    let mut emitters = [(0u8, 0u8, 0u8); 12];
+    for (i, rgb) in values.chunks(3).enumerate() {
+        emitters[i] = (rgb[0], rgb[1], rgb[2]);
+    }
+    let (node, payload) = apply_magkey_frame(&build_magkey_frame(&emitters))?;
+
+    println!("action=set-magkey-emitters");
+    println!("controller=05af:866a");
+    println!("path=ff02_ledmap_commit");
+    println!("ff02_hidraw={}", node.display());
+    println!("payload={}", hex_string(&payload));
+    println!("result=sent");
     Ok(())
 }
 
@@ -809,7 +871,8 @@ fn apply_magkey_entries(entries: &[(&str, (u8, u8, u8))]) -> io::Result<(PathBuf
     apply_magkey_frame(&build_magkey_payload(entries))
 }
 
-fn apply_magkey_frame(payload: &[u8; 64]) -> io::Result<(PathBuf, [u8; 64])> {
+/// Send a MagKey frame to the hardware without touching the saved state.
+fn apply_magkey_frame_raw(payload: &[u8; 64]) -> io::Result<(PathBuf, [u8; 64])> {
     let node = find_ff02_node()?;
     for packet in PKT_PRELUDE {
         send_feature_ff02(&node, &packet)?;
@@ -817,6 +880,27 @@ fn apply_magkey_frame(payload: &[u8; 64]) -> io::Result<(PathBuf, [u8; 64])> {
     send_out64(&node, payload)?;
     send_feature_ff02(&node, &MAGKEY_COMMIT_PACKET)?;
     Ok((node, *payload))
+}
+
+/// Send a MagKey frame and remember it, so later repaints can restore it.
+fn apply_magkey_frame(payload: &[u8; 64]) -> io::Result<(PathBuf, [u8; 64])> {
+    let result = apply_magkey_frame_raw(payload)?;
+    let mut state = load_keyboard_state();
+    state.magkeys = Some(emitters_from_frame(payload));
+    // A failure to save must not fail the (already applied) hardware write.
+    if let Err(err) = save_keyboard_state(&state) {
+        eprintln!("warning: could not save MagKey state: {err}");
+    }
+    Ok(result)
+}
+
+/// Inverse of `build_magkey_frame`.
+fn emitters_from_frame(frame: &[u8; 64]) -> [(u8, u8, u8); 12] {
+    let mut emitters = [(0u8, 0u8, 0u8); 12];
+    for (i, emitter) in emitters.iter_mut().enumerate() {
+        *emitter = (frame[i * 4 + 2], frame[i * 4 + 3], frame[(i + 1) * 4]);
+    }
+    emitters
 }
 
 fn set_cover_logo(segment: Option<&str>, color: (u8, u8, u8), force_brightness: bool) -> io::Result<()> {
@@ -1461,6 +1545,16 @@ mod tests {
         emitters[3] = (255, 0, 0); // A-left
         let frame = build_magkey_frame(&emitters);
         assert_eq!(frame[3 * 4 + 2], 0xff, "A-left red must land in frame[14]");
+    }
+
+    #[test]
+    fn emitters_from_frame_inverts_build_magkey_frame() {
+        let mut emitters = [(0u8, 0u8, 0u8); 12];
+        for (i, e) in emitters.iter_mut().enumerate() {
+            *e = (10 + i as u8, 100 + i as u8, 200 + i as u8);
+        }
+        let frame = build_magkey_frame(&emitters);
+        assert_eq!(emitters_from_frame(&frame), emitters);
     }
 
     #[test]

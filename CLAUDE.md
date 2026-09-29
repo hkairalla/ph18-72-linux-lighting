@@ -20,6 +20,13 @@ reverse-engineering scratchwork lives under git-ignored `testing/`.
 - Main keyboard whole-board color: any 24-bit RGB baseline (named presets `off`/`blue`/`red`/`green` are aliases).
 - Per-key keyboard colors (with the state-aware repaint model below).
 
+## MagKey persistence
+
+The daemon saves the last MagKey frame as `magkey=<zone>:r,g,b` lines in the
+same state file and re-sends it after every ff02 sweep (which would otherwise
+wipe WASD). `set-magkey-emitters --colors <36 values>` is the UI's static-apply
+path; animation frames use the direct Python path and are not saved.
+
 ## Per-key keyboard model
 
 The firmware silently ignores `report84` per-key writes when the keyboard is
