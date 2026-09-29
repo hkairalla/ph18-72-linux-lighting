@@ -1,0 +1,17 @@
+[Unit]
+Description=Repaint PH18-72 keyboard lighting after resume from sleep
+# The keyboard controller loses its colors when the machine sleeps; this watches
+# systemd-logind for the wake-up signal and re-sends the saved colors.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# %h expands to the user's home directory. Point this at wherever the repo lives
+# (systemctl --user edit ph18-lighting-resume.service) if it is not in ~/Projects.
+ExecStart=%h/Projects/ph18-72-linux-lighting/scripts/ph18-lighting-resume
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

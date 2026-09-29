@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Repaint the keyboard after the machine resumes from suspend/hibernate.
+#
+# The firmware falls back to its own animation when the keyboard controller
+# loses power, so the saved colors have to be re-sent. systemd-logind emits
+# PrepareForSleep(true) going to sleep and PrepareForSleep(false) on wake;
+# this watches for the second one. Runs as a systemd *user* service (see
+# packaging/ph18-lighting-resume.service).
+#
+#   ph18-lighting-resume            watch logind and repaint on each resume
+#   ph18-lighting-resume --now      repaint once, right now (also used to test)
+#
+# Test hooks: PH18_RESUME_BUS=session watches the session bus instead, and
+# PH18_RESUME_DELAY overrides the settle delay (seconds).
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+BUS="${PH18_RESUME_BUS:-system}"
+DELAY="${PH18_RESUME_DELAY:-3}"
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/ph18-lighting-repaint.lock"
+
+log() { echo "[ph18-resume] $*"; }
+
+find_daemon() {
+  local c
+  for c in "$HOME/.local/bin/ph18-lighting-daemon" \
+           "$REPO_ROOT/daemon/target/release/ph18-lighting-daemon" \
+           "$REPO_ROOT/daemon/target/debug/ph18-lighting-daemon"; do
+    [[ -x "$c" ]] && { echo "$c"; return 0; }
+  done
+  return 1
+}
+
+repaint() {
+  local daemon attempt
+  daemon="$(find_daemon)" || { log "no daemon binary found"; return 1; }
+  # USB devices re-enumerate on resume, so the hidraw nodes may not exist yet:
+  # retry a few times. flock keeps two repaints from interleaving HID writes.
+  for attempt in 1 2 3 4 5; do
+    if flock -w 120 "$LOCK" "$daemon" repaint-keyboard >/dev/null 2>&1; then
+      log "repainted (attempt $attempt)"
+      return 0
+    fi
+    log "repaint failed (attempt $attempt), retrying"
+    sleep 2
+  done
+  log "giving up after 5 attempts"
+  return 1
+}
+
+if [[ "${1:-}" == "--now" ]]; then
+  repaint
+  exit $?
+fi
+
+log "watching the $BUS bus for resume"
+# gdbus subscribes with a normal signal match, which works for an unprivileged
+# user (dbus-monitor on the system bus is denied and silently falls back to
+# eavesdropping, which never delivers). stdbuf keeps the pipe line-buffered.
+stdbuf -oL gdbus monitor "--$BUS" --dest org.freedesktop.login1 \
+    --object-path /org/freedesktop/login1 | while IFS= read -r line; do
+  case "$line" in
+    *PrepareForSleep*"(false,)"*)
+      log "resume detected; waiting ${DELAY}s for the keyboard to come back"
+      ( sleep "$DELAY"; repaint ) &
+      ;;
+  esac
+done

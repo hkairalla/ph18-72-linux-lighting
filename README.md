@@ -95,6 +95,25 @@ If your session does not pick up the new ACLs immediately, log out and back
 in once. The rule uses `uaccess`, so only the logged-in seat user gets access
 to the hidraw nodes.
 
+### Repaint after suspend/resume
+
+The keyboard controller loses its colors when the machine sleeps and the
+firmware drops back to its own animation. A small user service watches
+systemd-logind for the wake-up signal and re-sends the saved colors:
+
+```bash
+cargo build --release --manifest-path daemon/Cargo.toml
+cp packaging/ph18-lighting-resume.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ph18-lighting-resume.service
+```
+
+It waits a few seconds for the USB device to come back and retries, so the
+repaint takes 7-20 s after wake. `scripts/ph18-lighting-resume --now` repaints
+immediately (handy for testing). The service expects the repo at
+`~/Projects/ph18-72-linux-lighting`; override `ExecStart=` with
+`systemctl --user edit ph18-lighting-resume.service` if it lives elsewhere.
+
 ### Restore keyboard state on login (optional)
 
 The firmware reverts to its dynamic animation on cold boot. To replay your
