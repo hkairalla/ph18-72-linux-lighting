@@ -77,7 +77,32 @@
           <div class="wasd-wrap">
             <svg id="wasd-svg" viewBox="0 0 430 255" xmlns="http://www.w3.org/2000/svg">
 
-              <!-- Key background panels -->
+              <defs>
+                <clipPath id="clip-w"><rect x="108" y="32" width="84" height="88" rx="10"/></clipPath>
+                <clipPath id="clip-a"><rect x="28" y="140" width="84" height="88" rx="10"/></clipPath>
+                <clipPath id="clip-s"><rect x="148" y="140" width="84" height="88" rx="10"/></clipPath>
+                <clipPath id="clip-d"><rect x="268" y="140" width="84" height="88" rx="10"/></clipPath>
+              </defs>
+
+              <!-- Zone halos: wide translucent strokes behind the zones stand in for a blur
+                   (three stacked strokes per zone; an SVG blur filter cost ~1 core when animating).
+                   Colored by setEmitterSvg() through --hc. -->
+              <g class="zone-halos">
+                <g class="halo" id="gl-0"><polygon points="150,76 108,51.8 108,120 150,120"/><polygon points="150,76 108,51.8 108,120 150,120"/><polygon points="150,76 108,51.8 108,120 150,120"/><polygon points="150,76 108,51.8 108,120 150,120"/><polygon points="150,76 108,51.8 108,120 150,120"/></g>
+                <g class="halo" id="gl-1"><polygon points="150,76 192,51.8 192,32 108,32 108,51.8"/><polygon points="150,76 192,51.8 192,32 108,32 108,51.8"/><polygon points="150,76 192,51.8 192,32 108,32 108,51.8"/><polygon points="150,76 192,51.8 192,32 108,32 108,51.8"/><polygon points="150,76 192,51.8 192,32 108,32 108,51.8"/></g>
+                <g class="halo" id="gl-2"><polygon points="150,76 150,120 192,120 192,51.8"/><polygon points="150,76 150,120 192,120 192,51.8"/><polygon points="150,76 150,120 192,120 192,51.8"/><polygon points="150,76 150,120 192,120 192,51.8"/><polygon points="150,76 150,120 192,120 192,51.8"/></g>
+                <g class="halo" id="gl-3"><polygon points="70,184 28,159.8 28,228 70,228"/><polygon points="70,184 28,159.8 28,228 70,228"/><polygon points="70,184 28,159.8 28,228 70,228"/><polygon points="70,184 28,159.8 28,228 70,228"/><polygon points="70,184 28,159.8 28,228 70,228"/></g>
+                <g class="halo" id="gl-4"><polygon points="70,184 112,159.8 112,140 28,140 28,159.8"/><polygon points="70,184 112,159.8 112,140 28,140 28,159.8"/><polygon points="70,184 112,159.8 112,140 28,140 28,159.8"/><polygon points="70,184 112,159.8 112,140 28,140 28,159.8"/><polygon points="70,184 112,159.8 112,140 28,140 28,159.8"/></g>
+                <g class="halo" id="gl-5"><polygon points="70,184 70,228 112,228 112,159.8"/><polygon points="70,184 70,228 112,228 112,159.8"/><polygon points="70,184 70,228 112,228 112,159.8"/><polygon points="70,184 70,228 112,228 112,159.8"/><polygon points="70,184 70,228 112,228 112,159.8"/></g>
+                <g class="halo" id="gl-6"><polygon points="190,184 148,159.8 148,228 190,228"/><polygon points="190,184 148,159.8 148,228 190,228"/><polygon points="190,184 148,159.8 148,228 190,228"/><polygon points="190,184 148,159.8 148,228 190,228"/><polygon points="190,184 148,159.8 148,228 190,228"/></g>
+                <g class="halo" id="gl-7"><polygon points="190,184 232,159.8 232,140 148,140 148,159.8"/><polygon points="190,184 232,159.8 232,140 148,140 148,159.8"/><polygon points="190,184 232,159.8 232,140 148,140 148,159.8"/><polygon points="190,184 232,159.8 232,140 148,140 148,159.8"/><polygon points="190,184 232,159.8 232,140 148,140 148,159.8"/></g>
+                <g class="halo" id="gl-8"><polygon points="190,184 190,228 232,228 232,159.8"/><polygon points="190,184 190,228 232,228 232,159.8"/><polygon points="190,184 190,228 232,228 232,159.8"/><polygon points="190,184 190,228 232,228 232,159.8"/><polygon points="190,184 190,228 232,228 232,159.8"/></g>
+                <g class="halo" id="gl-9"><polygon points="310,184 268,159.8 268,228 310,228"/><polygon points="310,184 268,159.8 268,228 310,228"/><polygon points="310,184 268,159.8 268,228 310,228"/><polygon points="310,184 268,159.8 268,228 310,228"/><polygon points="310,184 268,159.8 268,228 310,228"/></g>
+                <g class="halo" id="gl-10"><polygon points="310,184 352,159.8 352,140 268,140 268,159.8"/><polygon points="310,184 352,159.8 352,140 268,140 268,159.8"/><polygon points="310,184 352,159.8 352,140 268,140 268,159.8"/><polygon points="310,184 352,159.8 352,140 268,140 268,159.8"/><polygon points="310,184 352,159.8 352,140 268,140 268,159.8"/></g>
+                <g class="halo" id="gl-11"><polygon points="310,184 310,228 352,228 352,159.8"/><polygon points="310,184 310,228 352,228 352,159.8"/><polygon points="310,184 310,228 352,228 352,159.8"/><polygon points="310,184 310,228 352,228 352,159.8"/><polygon points="310,184 310,228 352,228 352,159.8"/></g>
+              </g>
+
+              <!-- Key bodies: opaque, drawn over the halos so the glow only shows outside the key -->
               <g class="key-panels">
                 <rect class="key-panel" id="kp-w" x="108" y="32" width="84" height="88" rx="10"/>
                 <rect class="key-panel" id="kp-a" x="28"  y="140" width="84" height="88" rx="10"/>
@@ -85,45 +110,31 @@
                 <rect class="key-panel" id="kp-d" x="268" y="140" width="84" height="88" rx="10"/>
               </g>
 
+              <!-- Zones: each key is split into thirds (top wedge, lower-left, lower-right).
+                   em-N are the click targets and get colored by setEmitterSvg(). -->
+              <!-- W -->
+              <g class="emitter" id="em-0" data-key="w" data-zone="left" data-idx="0"><title>W · Left</title><polygon points="150,76 108,51.8 108,120 150,120" clip-path="url(#clip-w)"/></g>
+              <g class="emitter" id="em-1" data-key="w" data-zone="top" data-idx="1"><title>W · Top</title><polygon points="150,76 192,51.8 192,32 108,32 108,51.8" clip-path="url(#clip-w)"/></g>
+              <g class="emitter" id="em-2" data-key="w" data-zone="right" data-idx="2"><title>W · Right</title><polygon points="150,76 150,120 192,120 192,51.8" clip-path="url(#clip-w)"/></g>
+              <!-- A -->
+              <g class="emitter" id="em-3" data-key="a" data-zone="left" data-idx="3"><title>A · Left</title><polygon points="70,184 28,159.8 28,228 70,228" clip-path="url(#clip-a)"/></g>
+              <g class="emitter" id="em-4" data-key="a" data-zone="top" data-idx="4"><title>A · Top</title><polygon points="70,184 112,159.8 112,140 28,140 28,159.8" clip-path="url(#clip-a)"/></g>
+              <g class="emitter" id="em-5" data-key="a" data-zone="right" data-idx="5"><title>A · Right</title><polygon points="70,184 70,228 112,228 112,159.8" clip-path="url(#clip-a)"/></g>
+              <!-- S -->
+              <g class="emitter" id="em-6" data-key="s" data-zone="left" data-idx="6"><title>S · Left</title><polygon points="190,184 148,159.8 148,228 190,228" clip-path="url(#clip-s)"/></g>
+              <g class="emitter" id="em-7" data-key="s" data-zone="top" data-idx="7"><title>S · Top</title><polygon points="190,184 232,159.8 232,140 148,140 148,159.8" clip-path="url(#clip-s)"/></g>
+              <g class="emitter" id="em-8" data-key="s" data-zone="right" data-idx="8"><title>S · Right</title><polygon points="190,184 190,228 232,228 232,159.8" clip-path="url(#clip-s)"/></g>
+              <!-- D -->
+              <g class="emitter" id="em-9" data-key="d" data-zone="left" data-idx="9"><title>D · Left</title><polygon points="310,184 268,159.8 268,228 310,228" clip-path="url(#clip-d)"/></g>
+              <g class="emitter" id="em-10" data-key="d" data-zone="top" data-idx="10"><title>D · Top</title><polygon points="310,184 352,159.8 352,140 268,140 268,159.8" clip-path="url(#clip-d)"/></g>
+              <g class="emitter" id="em-11" data-key="d" data-zone="right" data-idx="11"><title>D · Right</title><polygon points="310,184 310,228 352,228 352,159.8" clip-path="url(#clip-d)"/></g>
+
               <!-- Key labels -->
               <g class="key-labels">
                 <text x="150" y="80">W</text>
                 <text x="70"  y="185">A</text>
                 <text x="190" y="185">S</text>
                 <text x="310" y="185">D</text>
-              </g>
-
-              <!-- Triangle outlines (subtle) -->
-              <g class="tri-lines">
-                <polygon class="tri" points="120,118 150,65 180,118"/>
-                <polygon class="tri" points="40,218  70,165  100,218"/>
-                <polygon class="tri" points="160,218 190,165 220,218"/>
-                <polygon class="tri" points="280,218 310,165 340,218"/>
-              </g>
-
-              <!-- Emitter circles — W -->
-              <circle class="emitter" id="em-0"  cx="120" cy="118" r="16" data-key="w" data-zone="left"  data-idx="0"/>
-              <circle class="emitter" id="em-1"  cx="150" cy="65"  r="16" data-key="w" data-zone="top"   data-idx="1"/>
-              <circle class="emitter" id="em-2"  cx="180" cy="118" r="16" data-key="w" data-zone="right" data-idx="2"/>
-              <!-- A -->
-              <circle class="emitter" id="em-3"  cx="40"  cy="218" r="16" data-key="a" data-zone="left"  data-idx="3"/>
-              <circle class="emitter" id="em-4"  cx="70"  cy="165" r="16" data-key="a" data-zone="top"   data-idx="4"/>
-              <circle class="emitter" id="em-5"  cx="100" cy="218" r="16" data-key="a" data-zone="right" data-idx="5"/>
-              <!-- S -->
-              <circle class="emitter" id="em-6"  cx="160" cy="218" r="16" data-key="s" data-zone="left"  data-idx="6"/>
-              <circle class="emitter" id="em-7"  cx="190" cy="165" r="16" data-key="s" data-zone="top"   data-idx="7"/>
-              <circle class="emitter" id="em-8"  cx="220" cy="218" r="16" data-key="s" data-zone="right" data-idx="8"/>
-              <!-- D -->
-              <circle class="emitter" id="em-9"  cx="280" cy="218" r="16" data-key="d" data-zone="left"  data-idx="9"/>
-              <circle class="emitter" id="em-10" cx="310" cy="165" r="16" data-key="d" data-zone="top"   data-idx="10"/>
-              <circle class="emitter" id="em-11" cx="340" cy="218" r="16" data-key="d" data-zone="right" data-idx="11"/>
-
-              <!-- Zone labels (outside circles) -->
-              <g class="zone-labels">
-                <text x="120" y="140">L</text><text x="150" y="48">T</text><text x="180" y="140">R</text>
-                <text x="40"  y="240">L</text><text x="70"  y="148">T</text><text x="100" y="240">R</text>
-                <text x="160" y="240">L</text><text x="190" y="148">T</text><text x="220" y="240">R</text>
-                <text x="280" y="240">L</text><text x="310" y="148">T</text><text x="340" y="240">R</text>
               </g>
 
             </svg>

@@ -47,12 +47,10 @@ body {
   background:
     radial-gradient(ellipse 55% 45% at 12% 55%, rgba(0,196,222,0.055) 0%, transparent 70%),
     radial-gradient(ellipse 40% 55% at 88% 45%, rgba(0,80,160,0.04) 0%, transparent 70%);
-  transition: opacity 0.8s ease;
-  animation: bgPulse 18s ease-in-out infinite alternate;
-}
-@keyframes bgPulse {
-  from { opacity: 0.75; }
-  to   { opacity: 1; }
+  opacity: 0.9;
+  /* Static on purpose: this used to pulse forever (bgPulse). Under WebKitGTK's
+     software renderer that repainted the whole window every frame and kept
+     the app at ~80% of a core while idle. */
 }
 
 /* ── App shell ─────────────────────────────────────────────────────── */
@@ -459,19 +457,21 @@ body {
   justify-content: center;
 }
 .wasd-wrap {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 1;
 }
 #wasd-svg {
-  width: min(100%, 520px);
+  /* Fill the panel: width-limited, and capped by height (viewBox is 430x255). */
+  width: min(100%, 820px, calc((100vh - 200px) * 430 / 255));
   height: auto;
   overflow: visible;
 }
 
 .key-panels .key-panel {
-  fill: rgba(15,22,32,0.8);
+  fill: rgb(13,19,28);
   stroke: rgba(0,196,222,0.10);
   stroke-width: 1;
   rx: 10;
@@ -490,35 +490,35 @@ body {
   dominant-baseline: middle;
 }
 
-.tri-lines .tri {
+/* Halo: five stacked translucent strokes (five: wide+faint to narrow+strong) fake a
+   soft glow without a blur. --hc is "r g b", set from JS with a `lit` class when the zone has color. */
+.zone-halos .halo { pointer-events: none; }
+.zone-halos .halo polygon {
   fill: none;
-  stroke: rgba(0,196,222,0.08);
-  stroke-width: 1;
+  stroke: transparent;
+  stroke-linejoin: round;
 }
-
-.emitter {
-  fill: #0d1825;
-  stroke: rgba(0,196,222,0.18);
+.zone-halos .halo.lit polygon:nth-child(1) { stroke: rgb(var(--hc) / 0.030); stroke-width: 28; }
+.zone-halos .halo.lit polygon:nth-child(2) { stroke: rgb(var(--hc) / 0.045); stroke-width: 22; }
+.zone-halos .halo.lit polygon:nth-child(3) { stroke: rgb(var(--hc) / 0.060); stroke-width: 16; }
+.zone-halos .halo.lit polygon:nth-child(4) { stroke: rgb(var(--hc) / 0.080); stroke-width: 11; }
+.zone-halos .halo.lit polygon:nth-child(5) { stroke: rgb(var(--hc) / 0.110); stroke-width: 6; }
+/* Each key is split into three zones (top wedge, lower-left, lower-right).
+   JS fills the polygon with the zone's color and puts a glow on the group. */
+.emitter polygon {
+  fill: rgba(13,24,37,0.55);
+  stroke: rgba(3,6,10,0.85);
   stroke-width: 1.5;
   cursor: pointer;
   transition: stroke 0.1s, stroke-width 0.1s;
 }
-.emitter:hover {
-  stroke: rgba(0,196,222,0.55);
+.emitter:hover polygon {
+  stroke: rgba(0,196,222,0.6);
   stroke-width: 2;
 }
-.emitter.selected {
+.emitter.selected polygon {
   stroke: #fff;
-  stroke-width: 2.5;
-}
-
-.zone-labels text {
-  fill: rgba(255,255,255,0.18);
-  font-size: 9px;
-  font-family: var(--font);
-  text-anchor: middle;
-  dominant-baseline: middle;
-  pointer-events: none;
+  stroke-width: 3;
 }
 
 /* ── Keyboard grid ─────────────────────────────────────────────────── */

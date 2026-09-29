@@ -343,8 +343,13 @@ function setEmitterSvg(idx, r, g, b) {
   const el = document.getElementById(`em-${idx}`);
   if (!el) return;
   const dark = r < 15 && g < 15 && b < 15;
-  el.style.fill   = dark ? '' : `rgb(${r},${g},${b})`;
-  el.style.filter = dark ? '' : `drop-shadow(0 0 7px rgb(${r},${g},${b}))`;
+  el.querySelector('polygon').style.fill = dark ? '' : `rgb(${r} ${g} ${b} / 0.62)`;
+  // The halo sits behind the zones, unclipped, so it spills past the key edge.
+  const halo = document.getElementById(`gl-${idx}`);
+  if (halo) {
+    halo.classList.toggle('lit', !dark);
+    if (!dark) halo.style.setProperty('--hc', `${r} ${g} ${b}`);
+  }
 }
 function updateAllEmitterSvg() {
   state.emitterColors.forEach(([r,g,b], i) => setEmitterSvg(i, r, g, b));
@@ -363,8 +368,12 @@ function animLoop(ts) {
   if (!fn) return;
   const emitters = fn(t);
 
-  // Update SVG every frame (cheap)
-  emitters.forEach(([r,g,b], i) => setEmitterSvg(i, r, g, b));
+  // Repaint the SVG at ~30 fps, not every display frame: WebKitGTK renders in
+  // software here, and repainting at 60-250 Hz kept the app near 100% of a core.
+  if (ts - (state.lastSvgMs || 0) >= 33) {
+    state.lastSvgMs = ts;
+    emitters.forEach(([r,g,b], i) => setEmitterSvg(i, r, g, b));
+  }
 
   // HID frame at ~25 fps — fire-and-forget, skip if previous in flight
   if (!state.hidBusy && ts - state.lastHidMs > 40) {
