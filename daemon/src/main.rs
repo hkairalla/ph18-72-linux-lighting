@@ -362,16 +362,19 @@ fn save_keyboard_state(state: &KeyboardState) -> io::Result<()> {
     Ok(())
 }
 
-// ff02 commit33 anchor count. The original research script used 20 × 8
-// (≈12 s on this hardware). 10 × 4 is the minimum that reliably paints all
-// 102 keys with the broadcast-mode word on this unit. Below that the right
-// half of the board stops committing. ~4 s per baseline change.
+// ff02 commit33 anchor count. The original research script used 20 x 8
+// (~12 s on this hardware). Bank count is what decides coverage: on kernel
+// 7.2 (Omarchy) 4 banks leaves the right third dark and 6 banks still misses
+// the numpad and far-right column, while 8 banks paints all 102 keys even at
+// 10 passes. Extra passes above ~10 did not help (20 x 6 still missed keys).
+// 12 passes x 8 banks is 10 x 8 plus a little margin. Sweep time varies
+// between ~6 s and ~20 s depending on how fast the device accepts packets.
 //
 // We tried batching report84 (8 indices per packet) as an alternative, but
 // the firmware only commits a partial set of the 8 slots per write, so
 // coverage was incomplete. The ff02 sweep stays as the baseline path.
-const FF02_ANCHOR_PASSES: usize = 10;
-const FF02_ANCHOR_BANKS: usize = 4;
+const FF02_ANCHOR_PASSES: usize = 12;
+const FF02_ANCHOR_BANKS: usize = 8;
 
 fn run_ff02_anchor(word: [u8; 4]) -> io::Result<PathBuf> {
     let node = find_ff02_node()?;
