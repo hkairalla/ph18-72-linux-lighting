@@ -90,6 +90,11 @@ enum Command {
     },
     /// Print the current persisted keyboard state.
     GetKeyboardState,
+    /// Print `name=index` for each key name (`none` if the daemon has no such key).
+    KeyboardKeyIndices {
+        #[arg(required = true)]
+        keys: Vec<String>,
+    },
     /// Set MagKeys using a confirmed safe command shape.
     SetMagkeys {
         #[arg(long)]
@@ -187,6 +192,7 @@ fn main() {
         Command::RepaintKeyboard => repaint_keyboard_cmd(),
         Command::ProbeKeyboardWord { word } => probe_keyboard_word(&word),
         Command::GetKeyboardState => get_keyboard_state(),
+        Command::KeyboardKeyIndices { keys } => keyboard_key_indices(&keys),
         Command::SetMagkeys { all } => set_magkeys(all),
         Command::SetMagkeysPattern {
             w,
@@ -608,9 +614,23 @@ fn get_keyboard_state() -> io::Result<()> {
     println!("action=get-keyboard-state");
     println!("state_path={}", path.display());
     println!("baseline={}", baseline_name(state.baseline_rgb));
+    println!(
+        "baseline_rgb={},{},{}",
+        state.baseline_rgb.0, state.baseline_rgb.1, state.baseline_rgb.2
+    );
     println!("overrides={}", state.overrides.len());
     for (index, &(r, g, b)) in &state.overrides {
         println!("override={index}:{r},{g},{b}");
+    }
+    Ok(())
+}
+
+fn keyboard_key_indices(keys: &[String]) -> io::Result<()> {
+    for key in keys {
+        match keyboard_key_index(key) {
+            Some(index) => println!("{key}={index}"),
+            None => println!("{key}=none"),
+        }
     }
     Ok(())
 }

@@ -10,6 +10,10 @@ const api = (() => {
     get_history:       () => Promise.resolve([]),
     run_daemon:        (args) => Promise.resolve({ ok: true, title: args[0], output: `mock: ${args.join(' ')}` }),
     send_magkey_frame: (_e)  => Promise.resolve('ok'),
+    get_keyboard_view: (names) => Promise.resolve({
+      baseline: [0, 0, 255],
+      keys: Object.fromEntries(names.map(n => [n, n === 'q' ? [255, 60, 60] : n === 'e' ? [60, 255, 90] : [0, 0, 255]])),
+    }),
   };
   return new Proxy({}, {
     get(_, prop) {
@@ -266,12 +270,53 @@ function pushHistory(record) {
 }
 
 /* ── Daemon commands ─────────────────────────────────────────────────*/
+// Commands that change what the main keyboard is showing.
+const KEYBOARD_CMDS = new Set([
+  'set-keyboard-key', 'clear-keyboard-key', 'reset-keyboard', 'set-keyboard-baseline',
+  'set-main-keyboard-blue', 'set-main-keyboard-red', 'set-main-keyboard-green',
+  'repaint-keyboard', 'restore-known-good',
+]);
+
 async function runDaemon(args) {
   setStatus(args[0], 'busy');
   const result = await api.run_daemon(args);
   pushHistory(result);
   setStatus(result.ok ? result.title + ' — ok' : result.title + ' — failed', result.ok ? 'ok' : 'err');
+  if (KEYBOARD_CMDS.has(args[0])) scheduleKeyColorRefresh();
   return result;
+}
+
+/* ── Key colors: show what the keyboard is displaying ────────────────
+   The firmware is write-only, so the truth is the daemon's persisted
+   {baseline, overrides}. The daemon resolves that to a color per key. */
+function paintKey(name, rgb) {
+  const btn = document.querySelector(`.kb-key[data-name="${name}"]`);
+  if (!btn || btn.classList.contains('kb-magkey')) return;
+  const [r, g, b] = rgb;
+  btn.style.setProperty('--kc', `${r} ${g} ${b}`);
+  btn.classList.toggle('kb-lit', r + g + b > 0);
+}
+
+let keyColorTimer = null;
+function scheduleKeyColorRefresh(delayMs = 150) {
+  clearTimeout(keyColorTimer);
+  keyColorTimer = setTimeout(refreshKeyColors, delayMs);
+}
+
+// Plain-browser dev mode (http://) uses the mock; the real app loads from file://
+// and must wait for pywebview to inject the API rather than paint mock colors.
+const BROWSER_DEV = location.protocol.startsWith('http');
+
+async function refreshKeyColors() {
+  if (!BROWSER_DEV && !(window.pywebview && window.pywebview.api)) return;
+  const names = KEYS.filter(k => k.kind !== 'magkey').map(k => k.name);
+  try {
+    const view = await api.get_keyboard_view(names);
+    if (!view || !view.keys) return;
+    for (const [name, rgb] of Object.entries(view.keys)) paintKey(name, rgb);
+  } catch (err) {
+    console.warn('key color refresh failed', err);
+  }
 }
 
 /* ── MagKey frame send (always sends full 12-emitter state) ──────────*/
@@ -517,6 +562,7 @@ function _initKeyboardPanelBody() {
   const SLIDER_THROTTLE_MS = 100;
   function liveApply(r, g, b) {
     if (state.kbKeys.length !== 1) return;
+    paintKey(state.kbKeys[0], [r, g, b]);
     livePending = [r, g, b, state.kbKeys[0]];
     if (liveTimer) return;
     liveTimer = setTimeout(() => {
@@ -549,6 +595,7 @@ function _initKeyboardPanelBody() {
     }
     const [r,g,b] = getKbRgb();
     state.kbKeys.forEach(key => {
+      paintKey(key, [r, g, b]);
       runDaemon(['set-keyboard-key', '--key', key, '--red', r, '--green', g, '--blue', b]);
     });
   });
@@ -804,6 +851,7 @@ async function initBackend() {
       badge.textContent = 'Mock';
     }
   } catch (_) {}
+  refreshKeyColors();
 }
 
 /* ── Boot ────────────────────────────────────────────────────────────*/
@@ -819,4 +867,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Also call immediately for browser dev mode where there is no pywebview.
   initBackend();
   window.addEventListener('pywebviewready', initBackend);
+  // The state can change outside the UI (CLI, restore service): resync on focus.
+  window.addEventListener('focus', () => scheduleKeyColorRefresh(0));
 });

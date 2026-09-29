@@ -123,6 +123,9 @@ class Api:
         self._lock = threading.Lock()
 
     def _detect_backend(self) -> str:
+        requested = os.environ.get("PH18_UI_BACKEND", "").strip().lower()
+        if requested in ("mock", "cargo"):
+            return requested
         if shutil.which("cargo") and DAEMON_DIR.exists():
             return "cargo"
         return "mock"
@@ -149,6 +152,39 @@ class Api:
         )
         output = "\n".join(filter(None, [result.stdout.strip(), result.stderr.strip()])) or "(no output)"
         return {"ok": result.returncode == 0, "title": title, "output": output}
+
+    def _daemon_lines(self, args: list[str]) -> list[str]:
+        result = self.run_daemon(args)
+        return result["output"].splitlines() if result["ok"] else []
+
+    def get_keyboard_view(self, names: list[str]) -> dict:
+        """Colors the keyboard is showing, keyed by UI key name.
+
+        The firmware is write-only, so this is the daemon's persisted state
+        ({baseline, overrides}), resolved to per-key colors.
+        Returns {baseline: [r, g, b], keys: {name: [r, g, b]}}.
+        """
+        if self._backend == "mock":
+            base = [0, 0, 255]
+            return {"baseline": base, "keys": {n: base for n in names} | {"q": [255, 60, 60], "e": [60, 255, 90]}}
+
+        indices: dict[str, int] = {}
+        for line in self._daemon_lines(["keyboard-key-indices", *names]):
+            name, _, value = line.partition("=")
+            if value.isdigit():
+                indices[name] = int(value)
+
+        baseline = [0, 0, 255]
+        overrides: dict[int, list[int]] = {}
+        for line in self._daemon_lines(["get-keyboard-state"]):
+            if line.startswith("baseline_rgb="):
+                baseline = [int(v) for v in line.split("=", 1)[1].split(",")]
+            elif line.startswith("override="):
+                index, _, rgb = line.split("=", 1)[1].partition(":")
+                overrides[int(index)] = [int(v) for v in rgb.split(",")]
+
+        keys = {name: overrides.get(index, baseline) for name, index in indices.items()}
+        return {"baseline": baseline, "keys": keys}
 
     # ── Direct HID frame send (animation loop) ────────────────────────
     def send_magkey_frame(self, emitters: list[list[int]]) -> str:
