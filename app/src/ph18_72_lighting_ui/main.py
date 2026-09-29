@@ -174,7 +174,7 @@ class Api:
             if value.isdigit():
                 indices[name] = int(value)
 
-        baseline = [0, 0, 255]
+        baseline: list[int] | None = None
         overrides: dict[int, list[int]] = {}
         for line in self._daemon_lines(["get-keyboard-state"]):
             if line.startswith("baseline_rgb="):
@@ -182,6 +182,11 @@ class Api:
             elif line.startswith("override="):
                 index, _, rgb = line.split("=", 1)[1].partition(":")
                 overrides[int(index)] = [int(v) for v in rgb.split(",")]
+
+        # If the state command failed we know nothing: report no colors rather than
+        # painting every key with an invented baseline.
+        if baseline is None:
+            return {"baseline": None, "keys": {}}
 
         keys = {name: overrides.get(index, baseline) for name, index in indices.items()}
         return {"baseline": baseline, "keys": keys}

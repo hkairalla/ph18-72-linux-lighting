@@ -307,11 +307,15 @@ function scheduleKeyColorRefresh(delayMs = 150) {
 // and must wait for pywebview to inject the API rather than paint mock colors.
 const BROWSER_DEV = location.protocol.startsWith('http');
 
+let keyColorSeq = 0;
 async function refreshKeyColors() {
   if (!BROWSER_DEV && !(window.pywebview && window.pywebview.api)) return;
   const names = KEYS.filter(k => k.kind !== 'magkey').map(k => k.name);
+  const seq = ++keyColorSeq;
   try {
     const view = await api.get_keyboard_view(names);
+    // A newer refresh started while this one was in flight: drop this stale answer.
+    if (seq !== keyColorSeq) return;
     if (!view || !view.keys) return;
     for (const [name, rgb] of Object.entries(view.keys)) paintKey(name, rgb);
   } catch (err) {
