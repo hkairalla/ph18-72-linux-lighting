@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Launch the PH18-72 lighting UI on Hyprland/Wayland.
+# Rebuilds the daemon if needed, then starts the UI against real hardware.
+# Extra env: PH18_UI_BACKEND=mock for a hardware-free run.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+VENV="$REPO_ROOT/app/.venv"
+
+if [[ ! -x "$VENV/bin/python" ]]; then
+  echo "Missing $VENV. Create it with:" >&2
+  echo "  python3 -m venv --system-site-packages $VENV && $VENV/bin/pip install -e $REPO_ROOT/app" >&2
+  exit 1
+fi
+
+export PH18_UI_BACKEND="${PH18_UI_BACKEND:-cargo}"
+if [[ "$PH18_UI_BACKEND" == "cargo" ]] && command -v cargo >/dev/null; then
+  cargo build --quiet --manifest-path "$REPO_ROOT/daemon/Cargo.toml"
+fi
+
+cd "$REPO_ROOT/app"
+exec "$VENV/bin/python" -m ph18_72_lighting_ui.main "$@"

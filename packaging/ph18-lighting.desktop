@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PH18-72 Lighting
+Comment=Keyboard, MagKey and logo lighting for the Acer Predator Helios 18
+Exec=%h/Projects/ph18-72-linux-lighting/scripts/ph18-lighting
+Icon=preferences-desktop-keyboard
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupWMClass=ph18-lighting

@@ -229,7 +229,8 @@ const MODES = {
 /* ── App state ───────────────────────────────────────────────────────*/
 const state = {
   panel: 'keyboard',
-  kbKey: null,
+  kbKey: null,         // last single-selected key; null when 0 or >1 selected
+  kbKeys: [],          // full selection set (length 0/1/N)
   mkEmitter: null,
   coverSeg: 'all',
   emitterColors: Array.from({length:12}, () => [0,0,0]),
@@ -399,47 +400,138 @@ function _initKeyboardPanelBody() {
     btn.type = 'button';
     btn.textContent = k.label;
     btn.dataset.name = k.name;
+    btn.dataset.label = k.label;
     btn.style.gridColumn = `${k.col} / span ${k.span}`;
     btn.style.gridRow = k.rowSpan ? `${k.row} / span ${k.rowSpan}` : String(k.row);
     if (isMagkey) {
       btn.title = 'MagKey — use the MagKey 3.0 panel';
       btn.tabIndex = -1;
-    } else {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.kb-key.selected').forEach(x => x.classList.remove('selected'));
-        btn.classList.add('selected');
-        state.kbKey = k.name;
-        document.getElementById('kb-selected-label').textContent = k.label;
-      });
     }
     grid.appendChild(btn);
   });
 
-  // Live slider preview: as the user drags R/G/B sliders, push the new
-  // color to the selected key at most every 100 ms. Per-key writes are
-  // ~50 ms each on the fast path, so 10 Hz keeps the UI responsive
-  // without saturating the daemon process spawn.
+  function updateSelectionLabel() {
+    const label = document.getElementById('kb-selected-label');
+    const n = state.kbKeys.length;
+    if (n === 0) {
+      label.textContent = 'Select a key';
+    } else if (n === 1) {
+      const btn = document.querySelector(`.kb-key[data-name="${state.kbKeys[0]}"]`);
+      label.textContent = btn ? btn.dataset.label : state.kbKeys[0];
+    } else {
+      label.textContent = `${n} keys`;
+    }
+  }
+
+  function setSelection(names) {
+    // Filter out MagKey names — drag-box may sweep over WASD; ignore them.
+    const filtered = [...new Set(names)].filter(name => {
+      const btn = document.querySelector(`.kb-key[data-name="${name}"]`);
+      return btn && !btn.classList.contains('kb-magkey');
+    });
+    document.querySelectorAll('.kb-key.selected').forEach(x => x.classList.remove('selected'));
+    filtered.forEach(name => {
+      const btn = document.querySelector(`.kb-key[data-name="${name}"]`);
+      if (btn) btn.classList.add('selected');
+    });
+    state.kbKeys = filtered;
+    state.kbKey = filtered.length === 1 ? filtered[0] : null;
+    updateSelectionLabel();
+  }
+
+  // Click-to-select a single key. Mousedown starts a potential box-drag
+  // (see below); if the pointer moves > DRAG_THRESHOLD before mouseup,
+  // it's a drag — we suppress this click via a flag on the grid.
+  grid.addEventListener('click', (ev) => {
+    if (grid.dataset.suppressClick === '1') {
+      grid.dataset.suppressClick = '';
+      return;
+    }
+    const btn = ev.target.closest('.kb-key');
+    if (!btn || btn.classList.contains('kb-magkey') || btn.classList.contains('kb-spacer')) {
+      return;
+    }
+    setSelection([btn.dataset.name]);
+  });
+
+  // Drag-box multi-selection. mousedown anywhere on the grid (including on
+  // a key) starts a potential drag. Once the pointer crosses DRAG_THRESHOLD
+  // we render a dashed selection box and switch into drag mode.
+  const DRAG_THRESHOLD = 6;
+  let dragState = null;
+
+  grid.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return; // left click only
+    dragState = { startX: ev.clientX, startY: ev.clientY, boxEl: null };
+  });
+
+  window.addEventListener('mousemove', (ev) => {
+    if (!dragState) return;
+    const dx = ev.clientX - dragState.startX;
+    const dy = ev.clientY - dragState.startY;
+    if (!dragState.boxEl && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    if (!dragState.boxEl) {
+      dragState.boxEl = document.createElement('div');
+      dragState.boxEl.className = 'kb-select-box';
+      document.body.appendChild(dragState.boxEl);
+    }
+    const left = Math.min(ev.clientX, dragState.startX);
+    const top = Math.min(ev.clientY, dragState.startY);
+    Object.assign(dragState.boxEl.style, {
+      left: left + 'px',
+      top: top + 'px',
+      width: Math.abs(dx) + 'px',
+      height: Math.abs(dy) + 'px',
+    });
+  });
+
+  window.addEventListener('mouseup', (ev) => {
+    if (!dragState) return;
+    const wasDrag = dragState.boxEl !== null;
+    if (wasDrag) {
+      // Suppress the click event that follows mouseup on the originating
+      // grid element so the click handler doesn't immediately overwrite
+      // our drag selection with a single-key select.
+      grid.dataset.suppressClick = '1';
+      const boxRect = dragState.boxEl.getBoundingClientRect();
+      const hits = [];
+      document.querySelectorAll('.kb-key').forEach(btn => {
+        if (btn.classList.contains('kb-magkey') || btn.classList.contains('kb-spacer')) return;
+        const r = btn.getBoundingClientRect();
+        const intersects = !(r.right < boxRect.left || r.left > boxRect.right ||
+                             r.bottom < boxRect.top || r.top > boxRect.bottom);
+        if (intersects) hits.push(btn.dataset.name);
+      });
+      dragState.boxEl.remove();
+      setSelection(hits);
+    }
+    dragState = null;
+  });
+
+  // Live slider preview: when EXACTLY one key is selected, push the color
+  // to the daemon at most every 100 ms while dragging. Multi-selection
+  // intentionally does NOT live-preview (would spawn N daemon processes
+  // per tick); user clicks Apply Key instead.
   let liveTimer = null;
   let livePending = null;
   const SLIDER_THROTTLE_MS = 100;
   function liveApply(r, g, b) {
-    if (!state.kbKey) return;
-    livePending = [r, g, b];
+    if (state.kbKeys.length !== 1) return;
+    livePending = [r, g, b, state.kbKeys[0]];
     if (liveTimer) return;
     liveTimer = setTimeout(() => {
-      const [pr, pg, pb] = livePending;
+      const [pr, pg, pb, key] = livePending;
       livePending = null;
       liveTimer = null;
-      if (state.kbKey) {
-        runDaemon(['set-keyboard-key', '--key', state.kbKey, '--red', pr, '--green', pg, '--blue', pb]);
+      // Re-check selection at fire time; user may have moved on.
+      if (state.kbKeys.length === 1 && state.kbKeys[0] === key) {
+        runDaemon(['set-keyboard-key', '--key', key, '--red', pr, '--green', pg, '--blue', pb]);
       }
     }, SLIDER_THROTTLE_MS);
   }
 
   let sliderInit = true;
   const getKbRgb = wireSliders('kb-r', 'kb-g', 'kb-b', 'kb-swatch', (r, g, b) => {
-    // wireSliders fires update() once on init to seed the swatch; skip
-    // that synthetic call so the daemon isn't pinged on UI startup.
     if (sliderInit) { sliderInit = false; return; }
     liveApply(r, g, b);
   });
@@ -451,20 +543,24 @@ function _initKeyboardPanelBody() {
   };
 
   wireBtn('btn-kb-apply', () => {
-    if (!state.kbKey) {
+    if (state.kbKeys.length === 0) {
       setStatus('pick a key first', 'err');
       return;
     }
     const [r,g,b] = getKbRgb();
-    runDaemon(['set-keyboard-key', '--key', state.kbKey, '--red', r, '--green', g, '--blue', b]);
+    state.kbKeys.forEach(key => {
+      runDaemon(['set-keyboard-key', '--key', key, '--red', r, '--green', g, '--blue', b]);
+    });
   });
 
   wireBtn('btn-kb-clear', () => {
-    if (!state.kbKey) {
+    if (state.kbKeys.length === 0) {
       setStatus('pick a key first', 'err');
       return;
     }
-    runDaemon(['clear-keyboard-key', '--key', state.kbKey]);
+    state.kbKeys.forEach(key => {
+      runDaemon(['clear-keyboard-key', '--key', key]);
+    });
   });
 
   wireBtn('btn-kb-reset', () => {

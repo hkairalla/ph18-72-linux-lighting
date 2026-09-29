@@ -9,9 +9,39 @@ import sys
 import threading
 from pathlib import Path
 
-os.environ.setdefault("PYWEBVIEW_GUI", "qt")
+APP_ID = "ph18-lighting"
+
+
+def _configure_wayland_env() -> None:
+    """Make GTK/WebKit behave under Hyprland (Wayland, fractional scale, NVIDIA).
+
+    Must run before GTK or WebKit is imported.
+    - GDK_SCALE is an integer scale for X11 and stacks badly on Wayland: with
+      the compositor at 1.6x and GDK_SCALE=2, clicks land away from the cursor.
+      Wayland fractional scaling comes from the compositor, so drop it.
+    - The WebKitGTK DMA-BUF renderer crashes on NVIDIA with a Wayland protocol
+      error at window creation; the fallback renderer is fine for this UI.
+    """
+    os.environ.setdefault("PYWEBVIEW_GUI", "gtk")
+    if os.environ.get("XDG_SESSION_TYPE") == "wayland" or os.environ.get("WAYLAND_DISPLAY"):
+        os.environ.pop("GDK_SCALE", None)
+        os.environ.pop("GDK_DPI_SCALE", None)
+        os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+
+
+_configure_wayland_env()
 
 import webview
+
+try:
+    # Sets the Wayland app_id (Hyprland "class"), so window rules can match it
+    # instead of the default "main.py".
+    from gi.repository import GLib
+
+    GLib.set_prgname(APP_ID)
+    GLib.set_application_name("PH18-72 Lighting")
+except Exception:
+    pass
 
 APP_DIR  = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parents[2]

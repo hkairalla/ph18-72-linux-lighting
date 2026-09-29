@@ -524,24 +524,30 @@ body {
 /* ── Keyboard grid ─────────────────────────────────────────────────── */
 .keyboard-main {
   padding: 16px;
-  /* The keyboard grid is ~738px wide (82 × 9px cell). Allow horizontal scroll
-     if the window is narrower than the keyboard. */
-  overflow-x: auto;
+  /* Size container: the keyboard scales to whatever room this panel has, so
+     it grows with the window instead of staying a fixed 738px. */
+  container-type: size;
+  overflow: hidden;
 }
 /* The keyboard is one big CSS grid: 82 quarter-unit columns by 6 rows.
    1 unit (1u) = 4 columns. Keys position themselves via grid-column /
    grid-row inline styles set in JS. The F-row is shorter than the others
-   so it stays visually distinct. */
+   so it stays visually distinct.
+
+   --cell is derived from the container (cq units exclude its padding): limited by width (82 columns) and
+   by height (label + 5 gaps + 5.75 key rows
+   of 4 cells each, in cell units), whichever is tighter. */
 .keyboard-grid {
-  --cell:        9px;
-  --row-h:       36px;       /* = 4 × --cell, so a 1u key is square */
-  --row-h-small: 28px;
+  --cell: clamp(6px, min(100cqw / 82, (100cqh - 30px - 25px) / 23.1), 26px);
+  --row-h:       calc(var(--cell) * 4);   /* a 1u key is square */
+  --row-h-small: calc(var(--cell) * 3.1);
   display: grid;
   grid-template-columns: repeat(82, var(--cell));
   grid-template-rows: var(--row-h-small) repeat(5, var(--row-h));
   column-gap: 0;
   row-gap: 5px;
   width: max-content;
+  margin-inline: auto;
 }
 .kb-key {
   padding: 0 4px;
@@ -550,7 +556,7 @@ body {
   background: var(--bg-card);
   color: var(--text-dim);
   font-family: var(--font);
-  font-size: 11px;
+  font-size: clamp(9px, calc(var(--cell) * 1.25), 20px);
   cursor: pointer;
   transition: all 0.12s;
   display: flex;
@@ -564,7 +570,7 @@ body {
 }
 .kb-key:hover { border-color: var(--border-mid); color: var(--text); background: var(--bg-hover); }
 .kb-key.selected { border-color: var(--accent); background: var(--bg-selected); color: var(--text); }
-.kb-key.f-key { font-size: 10px; }
+.kb-key.f-key { font-size: clamp(8px, calc(var(--cell) * 1.1), 17px); }
 .kb-key.kb-magkey {
   opacity: 0.5;
   cursor: not-allowed;
@@ -575,6 +581,16 @@ body {
   border-color: var(--border);
   color: var(--text-dim);
   background: var(--bg-card);
+}
+
+/* Drag-box multi-select overlay. Positioned in viewport (fixed) by JS as
+   the user drags from anywhere over the keyboard area. */
+.kb-select-box {
+  position: fixed;
+  pointer-events: none;
+  border: 1px dashed var(--accent);
+  background: rgba(0, 196, 222, 0.08);
+  z-index: 1000;
 }
 
 /* ── Cover logo ────────────────────────────────────────────────────── */
