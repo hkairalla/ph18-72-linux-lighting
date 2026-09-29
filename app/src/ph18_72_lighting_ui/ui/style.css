@@ -517,7 +517,7 @@ body {
    JS fills the polygon with the zone's color and puts a glow on the group. */
 .emitter polygon {
   fill: rgba(13,24,37,0.55);
-  stroke: rgba(3,6,10,0.85);
+  stroke: transparent;   /* no divider: zones only show through their fill */
   stroke-width: 1.5;
   cursor: pointer;
   transition: stroke 0.1s, stroke-width 0.1s;
