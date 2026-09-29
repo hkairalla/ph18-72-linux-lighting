@@ -1,0 +1,6 @@
+# Grant the logged-in seat user access to the lighting controllers.
+# uaccess (not MODE="0666") keeps the keyboard's raw HID stream private from
+# other local users. The 70- prefix matters: the uaccess tag has to be set
+# before 73-seat-late.rules applies it, so a 99- file gets no ACL.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="05af", ATTRS{idProduct}=="866a", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0d62", ATTRS{idProduct}=="ba51", TAG+="uaccess"

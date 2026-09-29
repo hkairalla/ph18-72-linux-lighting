@@ -10,7 +10,7 @@ reverse-engineering scratchwork lives under git-ignored `testing/`.
 - **Daemon**: Rust CLI in [daemon/src/main.rs](daemon/src/main.rs). One binary,
   one subcommand per operation. UI shells out per command.
 - **Hardware**: HID `05af:866a` (keyboard + MagKey) and `0d62:ba51` (Darfon
-  cover logo). udev rule in [packaging/99-ph18-72-lighting.rules](packaging/99-ph18-72-lighting.rules)
+  cover logo). udev rule in [packaging/70-ph18-72-lighting.rules](packaging/70-ph18-72-lighting.rules)
   gives the user hidraw access without sudo.
 
 ## What works

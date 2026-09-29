@@ -86,14 +86,14 @@ PH18_UI_BACKEND=cargo ph18-72-lighting-ui
 For local desktop testing without `sudo`, install the udev rule:
 
 ```bash
-sudo cp packaging/99-ph18-72-lighting.rules /etc/udev/rules.d/
+sudo cp packaging/70-ph18-72-lighting.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=hidraw
+sudo udevadm trigger --subsystem-match=hidraw --action=change
 ```
 
 If your session does not pick up the new ACLs immediately, log out and back
-in once. The current rule is intentionally permissive for local development
-and should be tightened before broader packaging.
+in once. The rule uses `uaccess`, so only the logged-in seat user gets access
+to the hidraw nodes.
 
 ### Restore keyboard state on login (optional)
 

@@ -1,7 +1,7 @@
 [Unit]
 Description=Restore PH18-72 keyboard lighting on login
 # Run after the graphical session is up so the user has hidraw access via the
-# logind ACL applied by the project's udev rule (99-ph18-72-lighting.rules).
+# logind ACL applied by the project's udev rule (70-ph18-72-lighting.rules).
 After=graphical-session.target
 
 [Service]
