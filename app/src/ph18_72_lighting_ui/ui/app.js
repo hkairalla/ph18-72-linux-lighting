@@ -693,11 +693,27 @@ function initMagkeyPanel() {
     });
   });
 
+  // Click empty space around the keys (not the sidebar controls) or press Esc
+  // to deselect the zone.
+  function deselectZone() {
+    document.querySelectorAll('.emitter.selected').forEach(e => e.classList.remove('selected'));
+    state.mkEmitter = null;
+    document.getElementById('mk-selected-label').textContent = '— select a zone —';
+  }
+  document.querySelector('.magkey-main').addEventListener('click', ev => {
+    if (!ev.target.closest('.emitter')) deselectZone();
+  });
+  document.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape' && document.getElementById('panel-magkey').classList.contains('active')) {
+      deselectZone();
+    }
+  });
+
   wireSliders('mk-r', 'mk-g', 'mk-b', 'mk-swatch');
 
   // Apply zone — updates one emitter, sends full 12-emitter frame so other keys stay lit
   document.getElementById('btn-mk-apply-zone').addEventListener('click', () => {
-    if (state.mkEmitter === null) return;
+    if (state.mkEmitter === null) { setStatus('pick a zone first', 'err'); return; }
     const r = +document.getElementById('mk-r').value;
     const g = +document.getElementById('mk-g').value;
     const b = +document.getElementById('mk-b').value;
@@ -708,7 +724,7 @@ function initMagkeyPanel() {
 
   // Apply whole key
   document.getElementById('btn-mk-apply-key').addEventListener('click', () => {
-    if (state.mkEmitter === null) return;
+    if (state.mkEmitter === null) { setStatus('pick a zone first', 'err'); return; }
     const r = +document.getElementById('mk-r').value;
     const g = +document.getElementById('mk-g').value;
     const b = +document.getElementById('mk-b').value;
