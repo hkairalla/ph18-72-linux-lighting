@@ -295,7 +295,8 @@ async function runDaemon(args) {
    themed: the colors of the lit keys are the real keyboard colors and never change.
    With no theme ({}), every override is removed and the built-in palette shows. */
 const THEME_VARS = ['--accent-rgb', '--bg', '--bg-rgb', '--bg-panel', '--bg-panel-rgb', '--bg-card',
-  '--bg-hover', '--bg-selected', '--text', '--text-rgb', '--text-dim', '--text-muted', '--on-accent', '--lift'];
+  '--bg-hover', '--bg-selected', '--text', '--text-rgb', '--text-dim', '--text-muted', '--on-accent', '--lift',
+  '--font', '--font-mono'];
 
 function hexToRgb(hex) {
   let h = hex.replace('#', '');
@@ -343,6 +344,12 @@ function applyTheme(theme) {
   set('--text-muted', `color-mix(in srgb, var(--text) ${light ? 54 : 32}%, var(--bg-card))`);
   set('--on-accent', luminance(accent) > 0.45 ? '#0b0b0b' : '#ffffff');
   set('--lift', light ? 'black' : 'white');
+  // Omarchy draws everything in the system monospace font (fontconfig alias); follow it.
+  if (theme.font) {
+    const stack = `"${theme.font}", ui-monospace, monospace`;
+    set('--font', stack);
+    set('--font-mono', stack);
+  }
   root.classList.toggle('theme-light', light);
   state.themeLight = light;
   ['w', 'a', 's', 'd'].forEach(updateKeyLabel);   // re-lift the MagKey letters for the new mode
@@ -619,6 +626,8 @@ function _initKeyboardPanelBody() {
     btn.className = 'kb-key' + (isMagkey ? ' kb-magkey' : '') + (k.fcls ? ' ' + k.fcls : '');
     btn.type = 'button';
     btn.textContent = k.label;
+    // Size the legend to fit the key: monospace glyphs are ~0.62em wide, plus a little padding.
+    btn.style.setProperty('--fit', (k.span / (k.label.length * 0.62 + 0.8)).toFixed(3));
     btn.dataset.name = k.name;
     btn.dataset.label = k.label;
     btn.style.gridColumn = `${k.col} / span ${k.span}`;
@@ -797,7 +806,6 @@ function _initKeyboardPanelBody() {
     });
   });
 
-  setStatus(`keyboard panel ready (${KEYS.length} keys, ${baselineBtns.length} baselines)`);
 }
 
 /* ── MagKey panel init ───────────────────────────────────────────────*/
@@ -1034,13 +1042,11 @@ function initSpeedDial() {
 async function initBackend() {
   try {
     const mode = await api.get_backend_mode();
-    const badge = document.getElementById('backend-badge');
-    if (mode === 'cargo') {
-      badge.textContent = 'Real Hardware';
-      badge.classList.add('real');
-    } else {
-      badge.textContent = 'Mock';
-    }
+    // "Real hardware" is the normal state and needs no badge; only the demo mode is worth flagging.
+    // Only trust "mock" once the real API is connected (or in plain-browser dev), otherwise the
+    // page's built-in fake backend would flash the badge at startup.
+    const settled = BROWSER_DEV || !!(window.pywebview && window.pywebview.api);
+    document.getElementById('backend-badge').hidden = !(settled && mode === 'mock');
   } catch (_) {}
   refreshKeyColors();
   refreshKeepalive();
@@ -1056,7 +1062,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initMagkeyPanel();
   initCoverPanel();
   initSpeedDial();
-  setStatus('Ready');
   // pywebviewready fires once the Python API is injected; re-run badge check then.
   // Also call immediately for browser dev mode where there is no pywebview.
   initBackend();

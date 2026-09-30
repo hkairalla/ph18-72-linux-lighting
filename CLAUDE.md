@@ -74,7 +74,10 @@ The GUI mirrors the active Omarchy theme. `Api.get_theme()` (main.py) reads
 `~/.local/state/omarchy/current/theme/colors.toml` (+ `theme.name`); `applyTheme()` (app.js) maps it
 onto the CSS variables by role (page / sidebar / card / hover; light themes are ordered differently)
 and re-reads every 3 s and on focus. Only the chrome is themed: lit-key colors are the real keyboard
-colors and never change, and status colors (green/red) are fixed. With no theme file (other distros,
+colors and never change, and status colors (green/red) are fixed. The font follows the fontconfig
+`monospace` alias (what `omarchy font set` changes and what Omarchy's shell draws in), resolved once via
+`fc-match` and cached until `~/.config/fontconfig/fonts.conf` changes; each key legend is sized to fit its
+key (`--fit`), so a wide font never clips labels. With no theme file (other distros,
 mock mode) the built-in cyan palette is used. All accent tints are derived from `--accent-rgb`; do not
 reintroduce literal colors in `style.css`.
 

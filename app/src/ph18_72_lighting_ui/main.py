@@ -124,6 +124,8 @@ class Api:
         self._hid_ready = False
         self._lock = threading.Lock()
         self._last_note = 0.0
+        self._font_key: object = None
+        self._font_family = ""
 
     def _detect_backend(self) -> str:
         requested = os.environ.get("PH18_UI_BACKEND", "").strip().lower()
@@ -170,6 +172,25 @@ class Api:
         except OSError:
             pass
 
+    def _system_mono_font(self) -> str:
+        """The fontconfig `monospace` family, which is what Omarchy's shell draws in and what
+        `omarchy font set` changes. Cached until ~/.config/fontconfig/fonts.conf changes."""
+        conf = Path.home() / ".config" / "fontconfig" / "fonts.conf"
+        try:
+            key: object = conf.stat().st_mtime_ns
+        except OSError:
+            key = 0
+        if key != self._font_key:
+            try:
+                out = subprocess.run(["fc-match", "monospace", "-f", "%{family}\n"], text=True,
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                     check=False, timeout=3).stdout
+                self._font_family = out.splitlines()[0].split(",")[0].strip() if out else ""
+            except (OSError, subprocess.SubprocessError):
+                self._font_family = ""
+            self._font_key = key
+        return self._font_family
+
     def get_theme(self) -> dict:
         """The active Omarchy theme, for the GUI to mirror. {} when there is none
         (not Omarchy, mock mode, unreadable file): the GUI then keeps its own palette.
@@ -192,7 +213,8 @@ class Api:
             name = (theme_dir / "theme.name").read_text().strip()
         except OSError:
             name = ""
-        return {"name": name, "mode": "light" if data.get("mode") == "light" else "dark", "colors": colors}
+        return {"name": name, "mode": "light" if data.get("mode") == "light" else "dark", "colors": colors,
+                "font": self._system_mono_font()}
 
     def get_keepalive(self) -> dict:
         """Keep-alive settings plus whether its background service is running."""

@@ -46,7 +46,7 @@ Every step except the build has a `--no-...` switch (`--no-deps --no-ui --no-ude
 - `install.sh` (uses `pacman`).
 - `hypr/ph18-lighting.lua` (uses Omarchy's `o.window()` helper in its Lua Hyprland config).
 - `active` mode reads Omarchy's `idle.screensaver` delay.
-- The GUI mirrors the active Omarchy theme (reads `~/.local/state/omarchy/current/theme/colors.toml`; light and dark themes both supported). Without that file it keeps its own palette.
+- The GUI mirrors the active Omarchy theme and font (reads `~/.local/state/omarchy/current/theme/colors.toml`; light and dark themes both supported). Without that file it keeps its own palette.
 
 Everything else is generic Linux. Porting notes are in [docs/PORTABILITY.md](../docs/PORTABILITY.md).
 
