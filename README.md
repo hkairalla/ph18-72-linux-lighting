@@ -11,7 +11,7 @@ scripts, and packet logs are kept out of Git (`testing/` is git-ignored).
 PyWebView UI (HTML/CSS/JS)
   -> Python shell (pywebview)
   -> Rust daemon CLI
-  -> HID (and future WMI/ACPI) backends
+  -> HID backends (WMI/ACPI investigated read-only, see below)
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the intended structure
@@ -26,8 +26,13 @@ protocol summary.
 | Cover Logo (whole + segments + brightness) | Confirmed | HID `0d62:ba51` |
 | Main keyboard whole-board color | Confirmed for any 24-bit RGB | HID `05af:866a` ff02 commit33 (broadcast mode) |
 | Main keyboard per-key colors | Confirmed (anchored to a baseline) | HID `05af:866a` ff02 anchor + `report84` per-key |
+| Keyboard + WASD light sleep (30 s) | Worked around | MagKey frame write resets the firmware timer; see [Keep the lights on](#keep-the-lights-on-beat-the-30-s-sleep) |
 | Base Logo | Unknown | HID inconclusive; WMI/ACPI may help |
 | Infinity Mirror | Unknown | HID inconclusive; WMI/ACPI may help |
+
+The firmware's Acer WMI gaming interface (keyboard backlight, misc settings, fans,
+battery health) has been mapped read-only; the findings are in
+[docs/PROTOCOL_NOTES.md](docs/PROTOCOL_NOTES.md).
 
 See [docs/HARDWARE_STATUS.md](docs/HARDWARE_STATUS.md) for the full table.
 
@@ -38,11 +43,16 @@ animation; only the ff02 commit33 sweep flips the firmware into a static
 frame. The daemon keeps a persistent state file
 (`~/.cache/ph18-lighting/keyboard-state`) with a 24-bit RGB baseline and a
 map of per-key overrides. Baseline / reset / repaint commands do a full
-ff02 anchor (~6 sec). Per-key `set-keyboard-key` / `clear-keyboard-key`
+ff02 anchor (~6-20 s). Per-key `set-keyboard-key` / `clear-keyboard-key`
 take a fast path (a single `report84`+`report86=0x01`, ~50 ms) and assume
 the firmware is already anchored from an earlier baseline this session.
 Setting Q red then E green leaves both as expected; clearing Q returns Q
 to the baseline.
+
+The daemon also saves the last MagKey (WASD) frame in the same state file and
+re-sends it after every anchor, because the anchor wipes the MagKeys. The UI shows
+each key in the color the keyboard is displaying; the firmware is write-only, so this
+is the daemon's saved state, not a readback.
 
 The ff02 word encoding is `[0xff, R, G, B]` — byte 0 = `0xff` is a
 broadcast flag that reaches all 102 keyboard indices. See
@@ -50,11 +60,26 @@ broadcast flag that reaches all 102 keyboard indices. See
 
 ## Development
 
-Prerequisites:
+### Prerequisites
+
+Arch / Omarchy:
 
 ```bash
-sudo apt install python3-pip python3.12-venv cargo
+sudo pacman -S --needed rust python python-gobject webkit2gtk-4.1 gtk3
 ```
+
+Debian / Ubuntu / Pop!_OS:
+
+```bash
+sudo apt install python3-pip python3.12-venv python3-gi gir1.2-webkit2-4.1 cargo
+```
+
+The UI uses pywebview's GTK backend, so the Python virtualenv must be able to see the
+system GTK bindings (`--system-site-packages`). The keep-alive feature additionally needs
+a Wayland compositor that supports `ext-idle-notify-v1` (tested on Hyprland; Sway and KDE
+Plasma 6 also implement it) and systemd user services.
+
+### Build and run
 
 Build the daemon and run inventory:
 
@@ -63,27 +88,42 @@ cd daemon
 cargo run -- inventory
 ```
 
-Install and run the testing UI:
+Set up the UI once:
 
 ```bash
 cd app
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-ph18-72-lighting-ui
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -e .
 ```
 
-Backend modes:
+Then launch it (builds the daemon first; set `PH18_UI_BACKEND=mock` to run without
+hardware):
+
+```bash
+scripts/ph18-lighting
+```
+
+`packaging/ph18-lighting.desktop` is a launcher entry for your app menu
+(copy it to `~/.local/share/applications/` and replace `%h` with your home directory).
+Other ways to start it:
 
 ```bash
 # Mock mode: no cargo, no hardware required
-PH18_UI_BACKEND=mock ph18-72-lighting-ui
+PH18_UI_BACKEND=mock app/.venv/bin/ph18-72-lighting-ui
 
 # Real mode: requires Rust/cargo and runs daemon commands against the device
-PH18_UI_BACKEND=cargo ph18-72-lighting-ui
+PH18_UI_BACKEND=cargo app/.venv/bin/ph18-72-lighting-ui
+
+make dev-ui      # rebuilds daemon then launches UI (recommended dev loop)
+make ui-mock
+make ui-real
+make daemon-inventory
 ```
 
-For local desktop testing without `sudo`, install the udev rule:
+### Device access (udev)
+
+The GUI does not run as root. Install the udev rule so your logged-in user can open the
+keyboard's hidraw nodes:
 
 ```bash
 sudo cp packaging/70-ph18-72-lighting.rules /etc/udev/rules.d/
@@ -93,86 +133,73 @@ sudo udevadm trigger --subsystem-match=hidraw --action=change
 
 If your session does not pick up the new ACLs immediately, log out and back
 in once. The rule uses `uaccess`, so only the logged-in seat user gets access
-to the hidraw nodes.
+to the hidraw nodes. (The `70-` prefix matters: `uaccess` has to be tagged before
+`73-seat-late.rules` runs, so a `99-` file would get no ACL.)
+
+### Wayland / Hyprland notes
+
+`main.py` prepares the environment itself before GTK loads: it selects the GTK backend,
+drops `GDK_SCALE` (an integer scale that makes clicks land in the wrong place under
+fractional Wayland scaling) and disables WebKit's DMA-BUF renderer (it crashes on NVIDIA
+with a Wayland protocol error). The window's Wayland app id is `ph18-lighting`, so you can
+give it a Hyprland rule, e.g. in `~/.config/hypr/hyprland.lua` (this uses Omarchy's
+`o.window` helper):
+
+```lua
+o.window("ph18-lighting", { float = true })
+o.window("ph18-lighting", { center = true })
+o.window("ph18-lighting", { size = { 1100, 720 } })
+```
+
+## Background services
+
+All three are systemd **user** services. Install the ones you want:
+
+| Service | What it does |
+| --- | --- |
+| `ph18-lighting-restore` | Repaints the saved keyboard + WASD colors on graphical login (the firmware reverts to its own animation on cold boot). |
+| `ph18-lighting-resume` | Repaints them after the laptop wakes from suspend/hibernate. |
+| `ph18-lighting-keepalive` | Keeps the keyboard and WASD lights from sleeping after 30 s; see the next section. |
+
+```bash
+cargo build --release --manifest-path daemon/Cargo.toml
+mkdir -p ~/.config/systemd/user
+cp packaging/ph18-lighting-{restore,resume,keepalive}.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ph18-lighting-restore ph18-lighting-resume ph18-lighting-keepalive
+```
+
+The units expect the repo at `~/Projects/ph18-72-linux-lighting`; override `ExecStart=`
+with `systemctl --user edit <unit>` if it lives elsewhere. The scripts they run
+(`scripts/ph18-lighting-resume`, `scripts/ph18-lighting-keepalive`) use the most recently
+built daemon (release, debug or `~/.local/bin`), so rebuild after updating.
 
 ### Keep the lights on (beat the 30 s sleep)
 
 The firmware turns the keyboard and WASD lights off 30 s after the last key press
 on the **laptop** keyboard (the external keyboard does not count). A MagKey frame
-write wakes them and restarts that timer, so a background service rewrites the
+write wakes them and restarts that timer, so the keep-alive service rewrites the
 saved MagKey frame (invisible: same colors) to hold them on. Choose the rule in the
 GUI (Keyboard page, "Keep lights on") or the CLI:
 
 ```bash
-ph18-lighting-daemon set-keepalive --mode active            # on while you use the computer
+ph18-lighting-daemon set-keepalive --mode active                 # on while you use the computer
 ph18-lighting-daemon set-keepalive --mode timeout --minutes 10   # on until idle for 10 min
-ph18-lighting-daemon set-keepalive --mode always            # never sleep
-ph18-lighting-daemon set-keepalive --mode off               # firmware default (30 s)
-ph18-lighting-daemon set-keepalive --ac-only true           # default: only on AC power
+ph18-lighting-daemon set-keepalive --mode always                 # never sleep
+ph18-lighting-daemon set-keepalive --mode off                    # firmware default (30 s)
+ph18-lighting-daemon set-keepalive --ac-only true                # default: only on AC power
 ph18-lighting-daemon get-keepalive
 ```
 
 `active` uses your Omarchy screensaver delay (`idle.screensaver` in
 `~/.config/omarchy/shell.json`, 150 s by default) as its idle threshold. Idle time comes
-from the Wayland `ext-idle-notify` protocol, so input from any device counts, and the
-lights come back the moment you touch anything. Settings live in
-`~/.config/ph18-lighting/keepalive.conf`. Install the service once:
+from the Wayland `ext-idle-notify` protocol (the input-idle variant, so an idle inhibitor
+such as video playback does not hold it up), so input from any device counts, and the lights come back the moment
+you touch anything. Settings live in `~/.config/ph18-lighting/keepalive.conf`. The
+service does nothing while the mode is `off`.
 
-```bash
-cargo build --release --manifest-path daemon/Cargo.toml
-cp packaging/ph18-lighting-keepalive.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now ph18-lighting-keepalive.service
-```
-
-The service does nothing while the mode is `off`.
-
-### Repaint after suspend/resume
-
-The keyboard controller loses its colors when the machine sleeps and the
-firmware drops back to its own animation. A small user service watches
-systemd-logind for the wake-up signal and re-sends the saved colors:
-
-```bash
-cargo build --release --manifest-path daemon/Cargo.toml   # or the debug build
-cp packaging/ph18-lighting-resume.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now ph18-lighting-resume.service
-```
-
-It waits a few seconds for the USB device to come back and retries, so the
-repaint takes 7-20 s after wake. `scripts/ph18-lighting-resume --now` repaints
-immediately (handy for testing). The service expects the repo at
-`~/Projects/ph18-72-linux-lighting`; override `ExecStart=` with
-`systemctl --user edit ph18-lighting-resume.service` if it lives elsewhere.
-
-### Restore keyboard state on login (optional)
-
-The firmware reverts to its dynamic animation on cold boot. To replay your
-last keyboard colors and MagKey (WASD) colors on graphical login, install the
-included systemd **user** service:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp packaging/ph18-lighting-restore.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now ph18-lighting-restore.service
-```
-
-The service runs `scripts/ph18-lighting-resume --now`, which finds the newest
-daemon build, retries while the USB device settles, and calls
-`repaint-keyboard`. That re-emits the state file at
-`~/.cache/ph18-lighting/keyboard-state` (baseline, per-key overrides and the
-saved MagKey colors) without modifying it.
-
-Make targets:
-
-```bash
-make daemon-inventory
-make ui-mock
-make ui-real
-make dev-ui      # rebuilds daemon then launches UI (recommended dev loop)
-```
+`scripts/ph18-lighting-resume --now` repaints immediately (handy for testing); a repaint
+takes 7-20 s.
 
 ## Daemon CLI
 
@@ -194,9 +221,19 @@ ph18-lighting-daemon clear-keyboard-key --key q
 ph18-lighting-daemon reset-keyboard
 ph18-lighting-daemon get-keyboard-state
 
-# MagKeys
+# MagKeys (the last frame is saved and restored after every keyboard sweep)
 ph18-lighting-daemon set-magkey-whole-key --key w --color blue
 ph18-lighting-daemon set-magkey-zones --key a --left 255,0,0 --top 0,255,0 --right 0,0,255
+ph18-lighting-daemon set-magkey-emitters --colors 0,180,255,0,180,255,...   # all 12 zones (36 values), what the UI uses
+
+# Light sleep timer (see "Keep the lights on")
+ph18-lighting-daemon set-keepalive --mode active
+ph18-lighting-daemon get-keepalive
+ph18-lighting-daemon keepalive-run        # the loop the service runs
+
+# Diagnostics
+ph18-lighting-daemon keyboard-key-indices q esc space   # key name -> firmware index
+ph18-lighting-daemon idle-probe --idle-after 5 --run-for 30   # watch Wayland idle/active changes
 
 # Cover Logo
 ph18-lighting-daemon set-cover-logo --red 0 --green 128 --blue 255
