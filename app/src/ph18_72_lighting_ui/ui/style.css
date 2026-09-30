@@ -1,21 +1,26 @@
 /* ── Variables ─────────────────────────────────────────────────────── */
 :root {
   --bg:           #070a0e;
+  --bg-rgb:       7 10 14;
   --bg-panel:     #0b1018;
+  --bg-panel-rgb: 11 16 24;
   --bg-card:      #0f1620;
   --bg-hover:     #141f2c;
   --bg-selected:  #162336;
-  --accent:       #00c4de;
-  --accent-dim:   rgba(0, 196, 222, 0.12);
-  --accent-mid:   rgba(0, 196, 222, 0.30);
-  --accent-glow:  rgba(0, 196, 222, 0.55);
+  --accent-rgb:   0 196 222;
+  --accent:       rgb(var(--accent-rgb));
+  --accent-dim:   rgb(var(--accent-rgb) / 0.12);
+  --accent-mid:   rgb(var(--accent-rgb) / 0.30);
+  --accent-glow:  rgb(var(--accent-rgb) / 0.55);
   --green:        #00de8f;
   --red:          #ff4060;
   --text:         #dce8f0;
   --text-dim:     #6a8498;
   --text-muted:   #344858;
-  --border:       rgba(0, 196, 222, 0.10);
-  --border-mid:   rgba(0, 196, 222, 0.25);
+  --border:       rgb(var(--accent-rgb) / 0.10);
+  --border-mid:   rgb(var(--accent-rgb) / 0.25);
+  --on-accent:    #06111a;   /* text drawn on an accent-colored button */
+  --lift:         white;     /* lit-key text is mixed toward this (black on light themes) */
   --radius:       6px;
   --radius-lg:    10px;
   --font:         'Segoe UI', -apple-system, system-ui, sans-serif;
@@ -45,8 +50,8 @@ body {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(ellipse 55% 45% at 12% 55%, rgba(0,196,222,0.055) 0%, transparent 70%),
-    radial-gradient(ellipse 40% 55% at 88% 45%, rgba(0,80,160,0.04) 0%, transparent 70%);
+    radial-gradient(ellipse 55% 45% at 12% 55%, rgb(var(--accent-rgb) / 0.055) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 55% at 88% 45%, rgb(var(--accent-rgb) / 0.03) 0%, transparent 70%);
   opacity: 0.9;
   /* Static on purpose: this used to pulse forever (bgPulse). Under WebKitGTK's
      software renderer that repainted the whole window every frame and kept
@@ -67,7 +72,7 @@ body {
   display: flex;
   align-items: stretch;
   height: var(--tab-h);
-  background: rgba(7,10,14,0.95);
+  background: rgb(var(--bg-rgb) / 0.95);
   border-bottom: 1px solid var(--border);
   padding: 0 4px;
   flex-shrink: 0;
@@ -99,11 +104,11 @@ body {
 }
 .tab:hover {
   color: var(--text);
-  background: rgba(0,196,222,0.06);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 .tab.active {
   color: var(--accent);
-  background: rgba(0,196,222,0.08);
+  background: rgb(var(--accent-rgb) / 0.08);
 }
 .tab.active::after {
   background: var(--accent);
@@ -167,7 +172,7 @@ body {
 .panel-sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;
-  background: rgba(11,16,24,0.7);
+  background: rgb(var(--bg-panel-rgb) / 0.7);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -264,7 +269,7 @@ body {
   border: none;
   border-radius: var(--radius);
   background: var(--accent);
-  color: #06111a;
+  color: var(--on-accent);
   font-family: var(--font);
   font-size: 13px;
   font-weight: 700;
@@ -481,18 +486,18 @@ body {
 }
 
 .key-panels .key-panel {
-  fill: rgb(13,19,28);
-  stroke: rgba(0,196,222,0.10);
+  fill: var(--bg-panel);
+  stroke: rgb(var(--accent-rgb) / 0.10);
   stroke-width: 1;
   rx: 10;
 }
 .key-panels .key-panel.k-selected {
-  stroke: rgba(0,196,222,0.35);
-  fill: rgba(0,196,222,0.05);
+  stroke: rgb(var(--accent-rgb) / 0.35);
+  fill: rgb(var(--accent-rgb) / 0.05);
 }
 
 .key-labels text {
-  fill: rgba(0,196,222,0.20);
+  fill: rgb(var(--accent-rgb) / 0.20);
   pointer-events: none;
   font-size: 22px;
   font-weight: 700;
@@ -546,11 +551,11 @@ body {
   transition: stroke 0.1s, stroke-width 0.1s;
 }
 .emitter:hover .zone-hit {
-  stroke: rgba(0,196,222,0.6);
+  stroke: rgb(var(--accent-rgb) / 0.6);
   stroke-width: 2;
 }
 .emitter.selected .zone-hit {
-  stroke: rgba(255,255,255,0.85);
+  stroke: rgb(var(--text-rgb, 255 255 255) / 0.85);
   stroke-width: 2;
 }
 
@@ -646,13 +651,13 @@ body {
 /* Lit keys: the label takes the key's real color with a soft glow, plus a
    faint tint on the border and inside. --kc is "r g b", set from JS. */
 .kb-key.kb-lit {
-  color: color-mix(in srgb, rgb(var(--kc)) 78%, white);
+  color: color-mix(in srgb, rgb(var(--kc)) 78%, var(--lift));
   border-color: rgb(var(--kc) / 0.38);
   background: color-mix(in srgb, rgb(var(--kc)) 7%, var(--bg-card));
   text-shadow: 0 0 calc(var(--cell) * 0.9) rgb(var(--kc) / 0.75);
   box-shadow: inset 0 0 calc(var(--cell) * 1.2) rgb(var(--kc) / 0.16);
 }
-.kb-key.kb-lit:hover { color: color-mix(in srgb, rgb(var(--kc)) 60%, white); border-color: rgb(var(--kc) / 0.7); }
+.kb-key.kb-lit:hover { color: color-mix(in srgb, rgb(var(--kc)) 60%, var(--lift)); border-color: rgb(var(--kc) / 0.7); }
 .kb-key.kb-lit.selected { border-color: var(--accent); }
 .kb-key.f-key { font-size: clamp(8px, calc(var(--cell) * 1.1), 17px); }
 .kb-key.kb-magkey {
@@ -673,7 +678,7 @@ body {
   position: fixed;
   pointer-events: none;
   border: 1px dashed var(--accent);
-  background: rgba(0, 196, 222, 0.08);
+  background: rgb(var(--accent-rgb) / 0.08);
   z-index: 1000;
 }
 
@@ -712,7 +717,7 @@ body {
 }
 .icon-dim  { font-size: 12px; color: var(--text-muted); }
 .icon-bright { font-size: 16px; color: var(--text-dim); }
-.brightness-row .slider { background: linear-gradient(to right, #0d1825, var(--accent)); }
+.brightness-row .slider { background: linear-gradient(to right, var(--bg-card), var(--accent)); }
 
 /* ── Placeholders ──────────────────────────────────────────────────── */
 .placeholder {
@@ -737,7 +742,7 @@ body {
   padding: 0 14px;
   gap: 8px;
   border-top: 1px solid var(--border);
-  background: rgba(7,10,14,0.9);
+  background: rgb(var(--bg-rgb) / 0.9);
   flex-shrink: 0;
 }
 .status-dot {
@@ -793,5 +798,5 @@ body {
 /* ── Scrollbars ────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0,196,222,0.18); border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0,196,222,0.35); }
+::-webkit-scrollbar-thumb { background: rgb(var(--accent-rgb) / 0.18); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--accent-rgb) / 0.35); }

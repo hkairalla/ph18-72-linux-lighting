@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import tomllib
 import time
 from pathlib import Path
 
@@ -168,6 +169,30 @@ class Api:
             path.touch()
         except OSError:
             pass
+
+    def get_theme(self) -> dict:
+        """The active Omarchy theme, for the GUI to mirror. {} when there is none
+        (not Omarchy, mock mode, unreadable file): the GUI then keeps its own palette.
+
+        Reads ~/.local/state/omarchy/current/theme/colors.toml, which Omarchy rewrites
+        whenever the theme changes. Only the chrome is themed; the key colors never are.
+        """
+        if self._backend == "mock":
+            return {}
+        theme_dir = Path.home() / ".local" / "state" / "omarchy" / "current"
+        try:
+            data = tomllib.loads((theme_dir / "theme" / "colors.toml").read_text())
+        except (OSError, tomllib.TOMLDecodeError):
+            return {}
+        colors = {k: v for k, v in data.items()
+                  if isinstance(v, str) and len(v) in (4, 7) and v.startswith("#")}
+        if "accent" not in colors or "background" not in colors or "foreground" not in colors:
+            return {}
+        try:
+            name = (theme_dir / "theme.name").read_text().strip()
+        except OSError:
+            name = ""
+        return {"name": name, "mode": "light" if data.get("mode") == "light" else "dark", "colors": colors}
 
     def get_keepalive(self) -> dict:
         """Keep-alive settings plus whether its background service is running."""

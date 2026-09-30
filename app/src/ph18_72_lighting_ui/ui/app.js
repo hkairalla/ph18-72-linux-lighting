@@ -10,6 +10,7 @@ const api = (() => {
     get_history:       () => Promise.resolve([]),
     run_daemon:        (args) => Promise.resolve({ ok: true, title: args[0], output: `mock: ${args.join(' ')}` }),
     send_magkey_frame: (_e)  => Promise.resolve('ok'),
+    get_theme: () => Promise.resolve({}),
     get_keepalive: () => Promise.resolve({ mode: 'active', minutes: 5, ac_only: true, screensaver_seconds: 150, service_active: true }),
     get_keyboard_view: (names) => Promise.resolve({
       baseline: [0, 0, 255],
@@ -287,6 +288,77 @@ async function runDaemon(args) {
   return result;
 }
 
+/* ── Omarchy theme: mirror the desktop palette ───────────────────────
+   Python reads ~/.local/state/omarchy/current/theme/colors.toml. We map it onto the CSS
+   variables by ROLE (page / sidebar / card / hover), because the names do not mean the same
+   in light themes ("darker_background" is a darker light grey there). Only the chrome is
+   themed: the colors of the lit keys are the real keyboard colors and never change.
+   With no theme ({}), every override is removed and the built-in palette shows. */
+const THEME_VARS = ['--accent-rgb', '--bg', '--bg-rgb', '--bg-panel', '--bg-panel-rgb', '--bg-card',
+  '--bg-hover', '--bg-selected', '--text', '--text-rgb', '--text-dim', '--text-muted', '--on-accent', '--lift'];
+
+function hexToRgb(hex) {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = [...h].map(c => c + c).join('');
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function luminance([r, g, b]) {   // WCAG relative luminance, 0..1
+  const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (!theme || !theme.colors || !theme.colors.accent) {
+    THEME_VARS.forEach(v => root.style.removeProperty(v));
+    root.classList.remove('theme-light');
+    state.themeLight = false;
+    return;
+  }
+  const c = theme.colors, light = theme.mode === 'light';
+  const pick = (...names) => names.map(n => c[n]).find(Boolean) || c.background;
+  // Roles, deepest to most lifted. Light themes are ordered by contrast instead of depth.
+  const roles = light
+    ? { bg: pick('background'), panel: pick('dark_background'), card: pick('lighter_background'),
+        hover: pick('darker_background'), selected: pick('selection', 'muted') }
+    : { bg: pick('darker_background'), panel: pick('dark_background'), card: pick('background'),
+        hover: pick('lighter_background'), selected: pick('selection', 'lighter_background') };
+  const accent = hexToRgb(c.accent);
+  const text = hexToRgb(pick('bright_foreground', 'foreground'));
+  const set = (k, v) => root.style.setProperty(k, v);
+  set('--accent-rgb', accent.join(' '));
+  set('--bg', roles.bg);             set('--bg-rgb', hexToRgb(roles.bg).join(' '));
+  set('--bg-panel', roles.panel);    set('--bg-panel-rgb', hexToRgb(roles.panel).join(' '));
+  set('--bg-card', roles.card);
+  set('--bg-hover', roles.hover);
+  set('--bg-selected', roles.selected);
+  set('--text', c.foreground ? (c.bright_foreground || c.foreground) : '#ddd');
+  set('--text-rgb', text.join(' '));
+  // Dim / muted text are derived from the real text and card colors, so they always
+  // read as "quieter than the text" whatever the theme calls its own shades.
+  // Light themes need more of the text color to stay legible (a mid-tone text on a pale
+  // card washes out fast).
+  set('--text-dim', `color-mix(in srgb, var(--text) ${light ? 74 : 58}%, var(--bg-card))`);
+  set('--text-muted', `color-mix(in srgb, var(--text) ${light ? 54 : 32}%, var(--bg-card))`);
+  set('--on-accent', luminance(accent) > 0.45 ? '#0b0b0b' : '#ffffff');
+  set('--lift', light ? 'black' : 'white');
+  root.classList.toggle('theme-light', light);
+  state.themeLight = light;
+  ['w', 'a', 's', 'd'].forEach(updateKeyLabel);   // re-lift the MagKey letters for the new mode
+}
+
+let themeStamp = '';
+async function refreshTheme() {
+  if (!BROWSER_DEV && !(window.pywebview && window.pywebview.api)) return;
+  let theme;
+  try { theme = await api.get_theme(); } catch (err) { return; }
+  const stamp = JSON.stringify(theme || {});
+  if (stamp === themeStamp) return;   // unchanged: nothing to repaint
+  themeStamp = stamp;
+  applyTheme(theme);
+}
+
 /* ── Keep lights on (keyboard + WASD sleep timer) ────────────────────
    The firmware sleeps the lights 30 s after the last laptop key press. The daemon's
    keep-alive service rewrites the saved MagKey frame to hold them on; the mode
@@ -437,7 +509,8 @@ function updateKeyLabel(key) {
     const on = z && z.classList.contains('lit');
     const [r, g, b] = on ? z.dataset.rgb.split(',').map(Number) : [40, 60, 75];
     // Lift toward white a little so pure blues stay readable on the dark body.
-    const lift = c => Math.round(c + (255 - c) * 0.22);
+    const target = state.themeLight ? 0 : 255;
+    const lift = c => Math.round(c + (target - c) * 0.22);
     stop.style.stopColor = on ? `rgb(${lift(r)} ${lift(g)} ${lift(b)})` : `rgb(${r} ${g} ${b})`;
   });
 }
@@ -877,16 +950,16 @@ function initTabs() {
       state.panel = panel;
       // Shift background glow tint per panel
       const tints = {
-        keyboard: 'rgba(0,196,222,0.055)',
-        magkey: 'rgba(0,196,222,0.055)',
+        keyboard: 'rgb(var(--accent-rgb) / 0.055)',
+        magkey: 'rgb(var(--accent-rgb) / 0.055)',
         'cover-logo': 'rgba(255,140,0,0.04)',
         'base-logo': 'rgba(0,222,143,0.04)',
         infinity: 'rgba(160,0,255,0.04)',
       };
-      const t = tints[panel] || 'rgba(0,196,222,0.05)';
+      const t = tints[panel] || 'rgb(var(--accent-rgb) / 0.05)';
       document.getElementById('bg-glow').style.background =
         `radial-gradient(ellipse 55% 45% at 12% 55%, ${t} 0%, transparent 70%),` +
-        `radial-gradient(ellipse 40% 55% at 88% 45%, rgba(0,80,160,0.03) 0%, transparent 70%)`;
+        `radial-gradient(ellipse 40% 55% at 88% 45%, rgb(var(--accent-rgb) / 0.03) 0%, transparent 70%)`;
     });
   });
 }
@@ -971,6 +1044,7 @@ async function initBackend() {
   } catch (_) {}
   refreshKeyColors();
   refreshKeepalive();
+  refreshTheme();
 }
 
 /* ── Boot ────────────────────────────────────────────────────────────*/
@@ -988,5 +1062,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initBackend();
   window.addEventListener('pywebviewready', initBackend);
   // The state can change outside the UI (CLI, restore service): resync on focus.
-  window.addEventListener('focus', () => { scheduleKeyColorRefresh(0); refreshKeepalive(); });
+  window.addEventListener('focus', () => { scheduleKeyColorRefresh(0); refreshKeepalive(); refreshTheme(); });
+  setInterval(refreshTheme, 3000);   // pick up `omarchy theme set` while the window is open
 });

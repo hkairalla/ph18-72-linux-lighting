@@ -66,7 +66,9 @@ change; the rest are opt-in.
    compositor if you want it floating and sized (the Hyprland/Omarchy example is in
    [`omarchy/hypr/ph18-lighting.lua`](../omarchy/hypr/ph18-lighting.lua)).
 5. **Menu entry.** Copy `packaging/ph18-lighting.desktop` and fix the path.
-6. **Idle threshold for `active` mode.** It follows Omarchy's `idle.screensaver`
+6. **Theme.** The GUI follows the Omarchy theme if `~/.local/state/omarchy/current/theme/colors.toml` exists; otherwise
+   it uses its built-in palette, so nothing needs changing elsewhere.
+7. **Idle threshold for `active` mode.** It follows Omarchy's `idle.screensaver`
    (`~/.config/omarchy/shell.json`, default 150 s). On other desktops that file won't exist, so the daemon falls back to 150 s.
    Use `timeout` with `--minutes N` to choose your own value.
 

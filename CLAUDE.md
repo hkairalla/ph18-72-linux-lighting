@@ -68,20 +68,23 @@ quirks (`report82/84/86` semantics, ff02 commit33 word table).
   per key) is enough. Mutating a single key is fast-path; baseline /
   reset / repaint are full anchor.
 
+## Theming (Omarchy)
+
+The GUI mirrors the active Omarchy theme. `Api.get_theme()` (main.py) reads
+`~/.local/state/omarchy/current/theme/colors.toml` (+ `theme.name`); `applyTheme()` (app.js) maps it
+onto the CSS variables by role (page / sidebar / card / hover; light themes are ordered differently)
+and re-reads every 3 s and on focus. Only the chrome is themed: lit-key colors are the real keyboard
+colors and never change, and status colors (green/red) are fixed. With no theme file (other distros,
+mock mode) the built-in cyan palette is used. All accent tints are derived from `--accent-rgb`; do not
+reintroduce literal colors in `style.css`.
+
 ## Open work
 
-- UI surfaces baseline selection, clear-key, and reset aren't built yet — the
-  user-facing controls only know `set-keyboard-key`. New daemon commands
-  exist; the UI needs panels.
-- The UI's keyboard layout lists `right_ctrl` but the daemon's key map
-  doesn't ([daemon/src/main.rs](daemon/src/main.rs) `keyboard_key_index`).
-  Clicking it errors. Either add it to the daemon map (if hardware allows)
-  or remove from the UI.
-- Base Logo and Infinity Mirror surfaces are still unsolved; HID captures
-  inconclusive, WMI/ACPI not yet explored.
-- ff02 anchor (used by baseline / reset / repaint) is still ~6 sec on this
-  hardware. The slowness is the 20 passes × 8 banks in `run_ff02_anchor`;
-  fewer may suffice now that the encoding is correct. Untested.
+Tracked as GitHub issues; the roadmap with the suggested order is issue #14
+(https://github.com/hkairalla/ph18-72-linux-lighting/issues/14). In short: hardware QA of the remaining
+controls (keep-alive, MagKey page, Cover Logo), Omarchy theme sync for the lights, the bar widget
+plugin, matching the GUI keyboard layout to the real one, and research on Base Logo / Infinity Mirror
+via the Acer WMI interface (findings so far in docs/PROTOCOL_NOTES.md).
 
 ## Hardware quick reference
 
