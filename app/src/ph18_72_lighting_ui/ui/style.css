@@ -619,6 +619,9 @@ body {
 .keyboard-grid {
   --cell: clamp(6px, min(100cqw / 76, 100cqh / 24), 26px);
   --u: calc(var(--cell) * 4);
+  /* Half the gap between neighbouring keys: a proportion of the key size (about 9% of a key between
+     two keys), so spacing looks the same at every window size. */
+  --gap: max(1.5px, calc(var(--u) * 0.045));
   position: relative;
   width: calc(var(--u) * 19);
   height: calc(var(--u) * 6);
@@ -626,10 +629,10 @@ body {
 }
 .kb-key {
   position: absolute;
-  left: calc(var(--x) * var(--u) + 2px);
-  top: calc(var(--y) * var(--u) + 2px);
-  width: calc(var(--w) * var(--u) - 4px);
-  height: calc(var(--h) * var(--u) - 4px);
+  left: calc(var(--x) * var(--u) + var(--gap));
+  top: calc(var(--y) * var(--u) + var(--gap));
+  width: calc(var(--w) * var(--u) - 2 * var(--gap));
+  height: calc(var(--h) * var(--u) - 2 * var(--gap));
   box-sizing: border-box;
   margin: 0;
   padding: 0 2px;

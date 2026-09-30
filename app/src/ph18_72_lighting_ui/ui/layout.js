@@ -34,29 +34,35 @@ const KEYS = (() => {
   const L = (ch, top) => [ch, ch.toUpperCase(), 1, top ? { top, main: ch.toUpperCase() } : {}];
   const letter = ch => [ch, ch.toUpperCase(), 1, {}, ['w', 'a', 's', 'd'].includes(ch) ? { kind: 'magkey' } : {}];
 
-  // ── Function row: measured positions (the keys are narrower than a standard key) ──
-  const FN_W = 0.78, FN_H = 0.78;
-  const fn = (name, label, x, lg) => add(name, label, x, 0, FN_W, FN_H, lg, { fcls: 'f-key' });
-  add('esc', 'Esc', 0.25, 0, FN_W, FN_H, { main: 'Esc' }, { fcls: 'f-key' });
-  fn('f1',  'F1',  1.4,  { fn: 'F1',  icon: 'mute' });
-  fn('f2',  'F2',  2.3,  { fn: 'F2',  icon: 'vol-down' });
-  fn('f3',  'F3',  3.2,  { fn: 'F3',  icon: 'vol-up' });
-  fn('f4',  'F4',  4.1,  { fn: 'F4',  icon: 'mic-mute' });
-  fn('f5',  'F5',  5.2,  { fn: 'F5',  icon: 'bright-down' });
-  fn('f6',  'F6',  6.1,  { fn: 'F6',  icon: 'bright-up' });
-  fn('f7',  'F7',  7.0,  { fn: 'F7',  icon: 'display' });
-  fn('f8',  'F8',  7.9,  { fn: 'F8',  icon: 'cast' });
-  fn('f9',  'F9',  8.9,  { fn: 'F9',  icon: 'airplane' });
-  fn('f10', 'F10', 9.75, { fn: 'F10', icon: 'touchpad-off' });
-  fn('f11', 'F11', 10.6, { fn: 'F11', icon: 'kbd-down' });
-  fn('f12', 'F12', 11.45, { fn: 'F12', icon: 'kbd-up' });
-  fn('print_screen', 'Print Screen', 12.5, { fn: 'PrtSc', icon: 'crop' });
-  fn('insert', 'Insert', 13.3, { main: 'Ins' });
-  fn('delete', 'Delete', 14.1, { main: 'Del' });
-  fn('media_prev',       'Previous track', 15.0,  { icon: 'prev', fill: true });
-  fn('media_play_pause', 'Play / pause',   15.9,  { icon: 'play-pause', fill: true });
-  fn('media_next',       'Next track',     16.85, { icon: 'next', fill: true });
-  fn('power',            'Power',          17.75, { icon: 'power' });
+  // ── Function row ──
+  // Measured from a photo, then corrected: the photo is taken at an angle, so upper rows sit a little
+  // left of where they really are (about 0.17 of a key above the number row). Checked against the
+  // physical constraints: Del ends exactly on the main block's right edge (15.0), and the four
+  // media/power keys are centred over the four numpad columns beneath them.
+  const FN_W = 0.75, FN_H = 0.8, FN_Y = 0.12;
+  const fn = (name, label, x, lg, w = FN_W) => add(name, label, x, FN_Y, w, FN_H, lg, { fcls: 'f-key' });
+  fn('esc', 'Esc', 0.4, { main: 'Esc' });
+  fn('f1',  'F1',  1.5,  { fn: 'F1',  icon: 'mute' });
+  fn('f2',  'F2',  2.4,  { fn: 'F2',  icon: 'vol-down' });
+  fn('f3',  'F3',  3.3,  { fn: 'F3',  icon: 'vol-up' });
+  fn('f4',  'F4',  4.2,  { fn: 'F4',  icon: 'mic-mute' });
+  fn('f5',  'F5',  5.25, { fn: 'F5',  icon: 'bright-down' });
+  fn('f6',  'F6',  6.15, { fn: 'F6',  icon: 'bright-up' });
+  fn('f7',  'F7',  7.05, { fn: 'F7',  icon: 'display' });
+  fn('f8',  'F8',  7.95, { fn: 'F8',  icon: 'cast' });
+  fn('f9',  'F9',  9.0,  { fn: 'F9',  icon: 'airplane' });
+  fn('f10', 'F10', 9.9,  { fn: 'F10', icon: 'touchpad-off' });
+  fn('f11', 'F11', 10.8, { fn: 'F11', icon: 'kbd-down' });
+  fn('f12', 'F12', 11.7, { fn: 'F12', icon: 'kbd-up' });
+  fn('print_screen', 'Print Screen', 12.65, { fn: 'PrtSc', icon: 'crop' });
+  fn('insert', 'Insert', 13.45, { main: 'Ins' });
+  fn('delete', 'Delete', 14.25, { main: 'Del' });
+  // Media / power: each centred over its numpad column (columns start at x = 15, 16, 17, 18).
+  const MW = 0.88, MX = (col) => col + (1 - MW) / 2;
+  fn('media_prev',       'Previous track', MX(15), { icon: 'prev', fill: true }, MW);
+  fn('media_play_pause', 'Play / pause',   MX(16), { icon: 'play-pause', fill: true }, MW);
+  fn('media_next',       'Next track',     MX(17), { icon: 'next', fill: true }, MW);
+  fn('power',            'Power',          MX(18), { icon: 'power' }, MW);
 
   // ── Number row ──
   row(1, 0, [
