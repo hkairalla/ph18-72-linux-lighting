@@ -610,27 +610,28 @@ body {
   container-type: size;
   overflow: hidden;
 }
-/* The keyboard is one big CSS grid: 82 quarter-unit columns by 6 rows.
-   1 unit (1u) = 4 columns. Keys position themselves via grid-column /
-   grid-row inline styles set in JS. The F-row is shorter than the others
-   so it stays visually distinct.
+/* The board is 19 units wide and 6 tall (1 unit = one standard key); layout.js gives every key its
+   x / y / width / height in units and app.js passes them as --x --y --w --h. Keys are positioned
+   absolutely from those numbers, so any real keycap width (1.25, 1.75, 2.25 ...) is exact.
 
-   --cell is derived from the container (cq units exclude its padding): limited by width (82 columns) and
-   by height (label + 5 gaps + 5.75 key rows
-   of 4 cells each, in cell units), whichever is tighter. */
+   --cell is a quarter unit, derived from the container (cq units exclude its padding): limited by
+   width (76 cells) and by height (24 cells), whichever is tighter. */
 .keyboard-grid {
-  --cell: clamp(6px, min(100cqw / 82, (100cqh - 30px - 25px) / 23.1), 26px);
-  --row-h:       calc(var(--cell) * 4);   /* a 1u key is square */
-  --row-h-small: calc(var(--cell) * 3.1);
-  display: grid;
-  grid-template-columns: repeat(82, var(--cell));
-  grid-template-rows: var(--row-h-small) repeat(5, var(--row-h));
-  column-gap: 0;
-  row-gap: 5px;
-  width: max-content;
+  --cell: clamp(6px, min(100cqw / 76, 100cqh / 24), 26px);
+  --u: calc(var(--cell) * 4);
+  position: relative;
+  width: calc(var(--u) * 19);
+  height: calc(var(--u) * 6);
   margin-inline: auto;
 }
 .kb-key {
+  position: absolute;
+  left: calc(var(--x) * var(--u) + 2px);
+  top: calc(var(--y) * var(--u) + 2px);
+  width: calc(var(--w) * var(--u) - 4px);
+  height: calc(var(--h) * var(--u) - 4px);
+  box-sizing: border-box;
+  margin: 0;
   padding: 0 2px;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -639,16 +640,42 @@ body {
   font-family: var(--font);
   font-size: min(clamp(9px, calc(var(--cell) * 1.25), 20px), calc(var(--cell) * var(--fit, 10)));
   cursor: pointer;
-  transition: all 0.12s;
+  transition: border-color 0.12s, color 0.12s, background-color 0.12s;
   display: flex;
   align-items: center;
   justify-content: center;
   white-space: nowrap;
   overflow: hidden;
-  /* Inset margin gives the visual gap between adjacent keys without
-     inflating the total grid width via grid column-gap. */
-  margin: 2px;
 }
+/* What is printed on a keycap (see renderLegend in app.js) */
+.kb-key .lg {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.05;
+}
+.kb-key .lg-row { flex-direction: row; gap: 0.3em; }
+.kb-key .lg-fn   { font-size: 0.68em; opacity: 0.9; }
+.kb-key .lg-top  { font-size: 0.78em; opacity: 0.85; }
+.kb-key .lg-sub  { font-size: min(0.62em, calc(var(--cell) * var(--fit-s, 10))); opacity: 0.8; }
+.kb-key .lg-corner { position: absolute; right: 3px; bottom: 2px; font-size: 0.6em; opacity: 0.8; }
+.kb-key .lg-bar  { width: 38%; height: 0; border-top: 1px solid currentColor; opacity: 0.55; }
+.kb-key .ic {
+  width: 1.3em;
+  height: 1.3em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.kb-key.f-key .ic { width: 1.25em; height: 1.25em; }
+.kb-key.kb-lit .ic { filter: drop-shadow(0 0 calc(var(--cell) * 0.5) rgb(var(--kc) / 0.7)); }
 .kb-key:hover { border-color: var(--border-mid); color: var(--text); background: var(--bg-hover); }
 .kb-key.selected { border-color: var(--accent); background: var(--bg-selected); color: var(--text); }
 /* Lit keys: the label takes the key's real color with a soft glow, plus a

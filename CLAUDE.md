@@ -29,6 +29,16 @@ path; animation frames use the direct Python path and are not saved. The WASD ke
 are read-only but show the current MagKey colors (a gradient across each key's left/top/right zones,
 class `mk-lit`), painted from `updateKeyLabel()` so the two pages always agree.
 
+## Keyboard layout (GUI)
+
+`app/src/ph18_72_lighting_ui/ui/layout.js` is the single source for the Keyboard page: every key's
+daemon `name`, sidebar `label`, printed legend (`main`, shifted `top`, small `sub`, `icon`, `fn`, `corner`)
+and its `x, y, w, h` in key units (1 = one standard key; the board is 19 x 6: a 15-wide main block plus a
+4-wide numpad). Positions were measured from a photo of the real keyboard. `name` must match the daemon's
+`keyboard_key_index`; never rename one without changing the daemon. Icons are an SVG sprite in
+`index.html` (`#ic-...`, drawn with `currentColor` so they follow the theme and a lit key's color).
+`app.js` (`renderLegend`) builds each keycap and `style.css` positions keys absolutely from `--x --y --w --h`.
+
 ## Keep-alive (light sleep timer)
 
 The firmware sleeps the keyboard + WASD lights 30 s after the last key press on the

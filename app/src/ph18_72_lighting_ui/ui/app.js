@@ -26,138 +26,6 @@ const api = (() => {
   });
 })();
 
-/* ── Keyboard layout ─────────────────────────────────────────────────
-   The whole keyboard is a single CSS grid: 82 quarter-unit columns by
-   6 rows. 1 unit (1u) = 4 columns. Each key declares its grid-column
-   start + span and its grid-row (with an optional rowSpan for the
-   numpad Enter, which is two rows tall on PH18-72).
-
-   Each entry: { name, label, col, row, span, kind?, rowSpan?, fcls? }
-     name    = daemon key identifier (must match keyboard_key_index in main.rs)
-     col     = grid-column-start (1-indexed)
-     span    = number of columns to span (1u = 4)
-     row     = grid-row (1 = F-row, 2 = number, 3 = QWERTY, 4 = home,
-               5 = bottom, 6 = spacebar)
-     kind    = 'magkey' for WASD (inert; MagKey panel owns these)
-     rowSpan = optional vertical span (used by numpad Enter)
-     fcls    = optional extra class (e.g. 'f-key' for shorter row 1 keys)
-*/
-const KEYS = [
-  // F-row (row 1)
-  { name:'esc',          label:'Esc',  col:1,  span:4, row:1, fcls:'f-key' },
-  { name:'f1',           label:'F1',   col:7,  span:3, row:1, fcls:'f-key' },
-  { name:'f2',           label:'F2',   col:10, span:3, row:1, fcls:'f-key' },
-  { name:'f3',           label:'F3',   col:13, span:3, row:1, fcls:'f-key' },
-  { name:'f4',           label:'F4',   col:16, span:3, row:1, fcls:'f-key' },
-  { name:'f5',           label:'F5',   col:21, span:3, row:1, fcls:'f-key' },
-  { name:'f6',           label:'F6',   col:24, span:3, row:1, fcls:'f-key' },
-  { name:'f7',           label:'F7',   col:27, span:3, row:1, fcls:'f-key' },
-  { name:'f8',           label:'F8',   col:30, span:3, row:1, fcls:'f-key' },
-  { name:'f9',           label:'F9',   col:35, span:3, row:1, fcls:'f-key' },
-  { name:'f10',          label:'F10',  col:38, span:3, row:1, fcls:'f-key' },
-  { name:'f11',          label:'F11',  col:41, span:3, row:1, fcls:'f-key' },
-  { name:'f12',          label:'F12',  col:44, span:3, row:1, fcls:'f-key' },
-  { name:'print_screen', label:'Prnt', col:49, span:4, row:1, fcls:'f-key' },
-  { name:'insert',       label:'Ins',  col:54, span:4, row:1, fcls:'f-key' },
-  { name:'delete',       label:'Del',  col:59, span:4, row:1, fcls:'f-key' },
-  { name:'media_prev',       label:'◀◀', col:65, span:4, row:1, fcls:'f-key' },
-  { name:'media_play_pause', label:'▶∥', col:69, span:4, row:1, fcls:'f-key' },
-  { name:'media_next',       label:'▶▶', col:73, span:4, row:1, fcls:'f-key' },
-  { name:'power',            label:'⏻',  col:77, span:4, row:1, fcls:'f-key' },
-
-  // Number row (row 2)
-  { name:'grave',     label:'`',    col:1,  span:4,  row:2 },
-  { name:'1',         label:'1',    col:5,  span:4,  row:2 },
-  { name:'2',         label:'2',    col:9,  span:4,  row:2 },
-  { name:'3',         label:'3',    col:13, span:4,  row:2 },
-  { name:'4',         label:'4',    col:17, span:4,  row:2 },
-  { name:'5',         label:'5',    col:21, span:4,  row:2 },
-  { name:'6',         label:'6',    col:25, span:4,  row:2 },
-  { name:'7',         label:'7',    col:29, span:4,  row:2 },
-  { name:'8',         label:'8',    col:33, span:4,  row:2 },
-  { name:'9',         label:'9',    col:37, span:4,  row:2 },
-  { name:'0',         label:'0',    col:41, span:4,  row:2 },
-  { name:'minus',     label:'-',    col:45, span:4,  row:2 },
-  { name:'equal',     label:'=',    col:49, span:4,  row:2 },
-  { name:'backspace', label:'Bksp', col:53, span:12, row:2 },
-  { name:'predator_sense',  label:'Pred', col:65, span:4, row:2 },
-  { name:'keypad_num_lock', label:'NL',   col:69, span:4, row:2 },
-  { name:'keypad_divide',   label:'/',    col:73, span:4, row:2 },
-  { name:'keypad_multiply', label:'*',    col:77, span:4, row:2 },
-
-  // QWERTY (row 3)
-  { name:'tab',           label:'Tab', col:1,  span:6,  row:3 },
-  { name:'q',             label:'Q',   col:7,  span:4,  row:3 },
-  { name:'w',             label:'W',   col:11, span:4,  row:3, kind:'magkey' },
-  { name:'e',             label:'E',   col:15, span:4,  row:3 },
-  { name:'r',             label:'R',   col:19, span:4,  row:3 },
-  { name:'t',             label:'T',   col:23, span:4,  row:3 },
-  { name:'y',             label:'Y',   col:27, span:4,  row:3 },
-  { name:'u',             label:'U',   col:31, span:4,  row:3 },
-  { name:'i',             label:'I',   col:35, span:4,  row:3 },
-  { name:'o',             label:'O',   col:39, span:4,  row:3 },
-  { name:'p',             label:'P',   col:43, span:4,  row:3 },
-  { name:'left_bracket',  label:'[',   col:47, span:4,  row:3 },
-  { name:'right_bracket', label:']',   col:51, span:4,  row:3 },
-  { name:'backslash',     label:'\\',  col:55, span:10, row:3 },
-  { name:'keypad_7',     label:'7', col:65, span:4, row:3 },
-  { name:'keypad_8',     label:'8', col:69, span:4, row:3 },
-  { name:'keypad_9',     label:'9', col:73, span:4, row:3 },
-  { name:'keypad_minus', label:'-', col:77, span:4, row:3 },
-
-  // Home row (row 4)
-  { name:'caps_lock',  label:'Caps',  col:1,  span:7,  row:4 },
-  { name:'a',          label:'A',     col:8,  span:4,  row:4, kind:'magkey' },
-  { name:'s',          label:'S',     col:12, span:4,  row:4, kind:'magkey' },
-  { name:'d',          label:'D',     col:16, span:4,  row:4, kind:'magkey' },
-  { name:'f',          label:'F',     col:20, span:4,  row:4 },
-  { name:'g',          label:'G',     col:24, span:4,  row:4 },
-  { name:'h',          label:'H',     col:28, span:4,  row:4 },
-  { name:'j',          label:'J',     col:32, span:4,  row:4 },
-  { name:'k',          label:'K',     col:36, span:4,  row:4 },
-  { name:'l',          label:'L',     col:40, span:4,  row:4 },
-  { name:'semicolon',  label:';',     col:44, span:4,  row:4 },
-  { name:'apostrophe', label:'"',     col:48, span:4,  row:4 },
-  { name:'enter',      label:'Enter', col:52, span:13, row:4 },
-  { name:'keypad_4',    label:'4', col:65, span:4, row:4 },
-  { name:'keypad_5',    label:'5', col:69, span:4, row:4 },
-  { name:'keypad_6',    label:'6', col:73, span:4, row:4 },
-  { name:'keypad_plus', label:'+', col:77, span:4, row:4 },
-
-  // Bottom row (row 5) — arrow_up sits in this row at col 61
-  { name:'left_shift',  label:'Shift', col:1,  span:9,  row:5 },
-  { name:'z',           label:'Z',     col:10, span:4,  row:5 },
-  { name:'x',           label:'X',     col:14, span:4,  row:5 },
-  { name:'c',           label:'C',     col:18, span:4,  row:5 },
-  { name:'v',           label:'V',     col:22, span:4,  row:5 },
-  { name:'b',           label:'B',     col:26, span:4,  row:5 },
-  { name:'n',           label:'N',     col:30, span:4,  row:5 },
-  { name:'m',           label:'M',     col:34, span:4,  row:5 },
-  { name:'comma',       label:',',     col:38, span:4,  row:5 },
-  { name:'period',      label:'.',     col:42, span:4,  row:5 },
-  { name:'slash',       label:'/',     col:46, span:4,  row:5 },
-  { name:'right_shift', label:'RShift',col:50, span:11, row:5 },
-  { name:'arrow_up',    label:'Up',    col:61, span:4,  row:5 },
-  { name:'keypad_1',     label:'1',   col:65, span:4, row:5 },
-  { name:'keypad_2',     label:'2',   col:69, span:4, row:5 },
-  { name:'keypad_3',     label:'3',   col:73, span:4, row:5 },
-  { name:'keypad_enter', label:'Ent', col:77, span:4, row:5, rowSpan:2 },
-
-  // Spacebar row (row 6) — arrow_down sits at col 61 (directly under arrow_up)
-  { name:'left_ctrl',    label:'Ctrl',   col:1,  span:5,  row:6 },
-  { name:'fn',           label:'Fn',     col:6,  span:4,  row:6 },
-  { name:'left_windows', label:'Win',    col:10, span:4,  row:6 },
-  { name:'left_alt',     label:'Alt',    col:14, span:4,  row:6 },
-  { name:'space',        label:'Space',  col:18, span:20, row:6 },
-  { name:'right_alt',    label:'AltGr',  col:38, span:4,  row:6 },
-  { name:'menu',         label:'Menu',   col:42, span:4,  row:6 },
-  { name:'copilot',      label:'Cpilot', col:46, span:11, row:6 },
-  { name:'arrow_left',   label:'Lft',    col:57, span:4,  row:6 },
-  { name:'arrow_down',   label:'Dn',     col:61, span:4,  row:6 },
-  { name:'arrow_right',     label:'Rt',  col:65, span:4, row:6 },
-  { name:'keypad_0',        label:'0',   col:69, span:4, row:6 },
-  { name:'keypad_decimal',  label:'.',   col:73, span:4, row:6 },
-];
 
 /* ── MagKey emitter spatial data ─────────────────────────────────────
    Real 2D coordinates derived from hardware photo (2026-04-26).
@@ -636,6 +504,51 @@ function initKeyboardPanel() {
   }
 }
 
+/* ── Key legends ─────────────────────────────────────────────────────
+   Build what is printed on a keycap from its layout data (see layout.js): a shifted symbol above
+   the main character, a small second legend below (numpad Home/End/...), the small "F1" over an
+   icon on the function row, an optional corner mark (the € on 5), and arrow glyphs. */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function mk(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function iconEl(name, filled) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'ic' + (filled ? ' filled' : ''));
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `#ic-${name}`);
+  svg.appendChild(use);
+  return svg;
+}
+// Longest line printed at the key's main size (the sub-legend is sized separately).
+// A key with an icon (or a small "F1" tag) prints no text of its own unless `main` says so.
+const legendMain = (lg, label) => lg.main !== undefined ? lg.main : (lg.icon || lg.fn ? '' : label);
+function legendChars(lg, label) {
+  const main = legendMain(lg, label);
+  const mainLine = (lg.arrow ? 2 : 0) + main.length + (lg.icon && main ? 2 : 0);
+  return Math.max(mainLine, (lg.top || '').length, (lg.fn || '').length, lg.icon && !main ? 1.6 : 1);
+}
+function renderLegend(k) {
+  if (k.kind === 'magkey') {
+    // One letter in a span, so it can be filled with the key's zone colors (paintMagkeyOnKeyboard).
+    return mk('span', 'lbl', k.label.toUpperCase());
+  }
+  const lg = k.lg, main = legendMain(lg, k.label);
+  const wrap = mk('span', 'lg' + (lg.icon && main ? ' lg-row' : ''));
+  if (lg.fn) wrap.appendChild(mk('span', 'lg-fn', lg.fn));
+  if (lg.top) wrap.appendChild(mk('span', 'lg-top', lg.top));
+  if (lg.icon) wrap.appendChild(iconEl(lg.icon, lg.fill));
+  if (main || lg.arrow) wrap.appendChild(mk('span', 'lg-main', (lg.arrow ? lg.arrow + ' ' : '') + main));
+  if (lg.sub) wrap.appendChild(mk('span', 'lg-sub', lg.sub));
+  if (lg.corner) wrap.appendChild(mk('span', 'lg-corner', lg.corner));
+  if (lg.bar) wrap.appendChild(mk('span', 'lg-bar'));
+  return wrap;
+}
+
 function _initKeyboardPanelBody() {
   const grid = document.getElementById('keyboard-grid');
   if (!grid) throw new Error('#keyboard-grid not in DOM');
@@ -644,24 +557,23 @@ function _initKeyboardPanelBody() {
     const isMagkey = k.kind === 'magkey';
     btn.className = 'kb-key' + (isMagkey ? ' kb-magkey' : '') + (k.fcls ? ' ' + k.fcls : '');
     btn.type = 'button';
-    if (isMagkey) {
-      // The legend sits in a span so it can be filled with the key's zone colors (see paintMagkeyOnKeyboard).
-      const span = document.createElement('span');
-      span.className = 'lbl';
-      span.textContent = k.label;
-      btn.appendChild(span);
-    } else {
-      btn.textContent = k.label;
-    }
-    // Size the legend to fit the key: monospace glyphs are ~0.62em wide, plus a little padding.
-    btn.style.setProperty('--fit', (k.span / (k.label.length * 0.62 + 0.8)).toFixed(3));
+    btn.appendChild(renderLegend(k));
+    // Size the legends to fit the key: monospace glyphs are ~0.62em wide, plus a little padding.
+    const fit = (chars) => ((k.w * 4) / (chars * 0.62 + 0.8)).toFixed(3);
+    btn.style.setProperty('--fit', fit(legendChars(k.lg, k.label)));
+    if (k.lg.sub) btn.style.setProperty('--fit-s', fit(k.lg.sub.length));
     btn.dataset.name = k.name;
     btn.dataset.label = k.label;
-    btn.style.gridColumn = `${k.col} / span ${k.span}`;
-    btn.style.gridRow = k.rowSpan ? `${k.row} / span ${k.rowSpan}` : String(k.row);
+    // Position from the layout data (units of one standard key); the stylesheet does the math.
+    btn.style.setProperty('--x', k.x);
+    btn.style.setProperty('--y', k.y);
+    btn.style.setProperty('--w', k.w);
+    btn.style.setProperty('--h', k.h);
     if (isMagkey) {
-      btn.title = 'MagKey — use the MagKey 3.0 panel';
+      btn.title = 'MagKey — edit it on the MagKey 3.0 tab';
       btn.tabIndex = -1;
+    } else {
+      btn.title = k.label;
     }
     grid.appendChild(btn);
   });
