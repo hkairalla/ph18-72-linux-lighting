@@ -25,9 +25,21 @@ reverse-engineering scratchwork lives under git-ignored `testing/`.
 The daemon saves the last MagKey frame as `magkey=<zone>:r,g,b` lines in the
 same state file and re-sends it after every ff02 sweep (which would otherwise
 wipe WASD). `set-magkey-emitters --colors <36 values>` is the UI's static-apply
-path; animation frames use the direct Python path and are not saved. The WASD keys on the Keyboard page
+path; animations are not saved as colors. The WASD keys on the Keyboard page
 are read-only but show the current MagKey colors (a gradient across each key's left/top/right zones,
 class `mk-lit`), painted from `updateKeyLabel()` so the two pages always agree.
+
+## MagKey animations (background)
+
+`set-animation --mode wheel|knight|hue|chase|breathe|zone|cascade|none [--speed 0.1-4]` writes
+`~/.config/ph18-lighting/animation.conf` (mode, speed, epoch_ms, phase0). The keep-alive service
+(`keepalive-run`) plays it at ~25 fps (`daemon/src/animation.rs` is the Rust port of the JS `MODES`;
+clock `t = phase0 + (now - epoch_ms)/1000 * speed`), so it survives closing the GUI. It obeys the
+keep-alive rules (idle / AC-only) and, when stopped, re-sends the saved static colors. Starting one
+while keep-alive is `off` switches it to `active`. The GUI only previews (same clock) and sends
+`set-animation`; `get-animation` reads state. Frame bursts take a shared flock on
+`$XDG_RUNTIME_DIR/ph18-lighting-hid.lock`; keyboard sweeps take it exclusively. `animation-frame --mode M --t T`
+prints the 36 values (used for JS/Rust parity checks).
 
 ## Keyboard layout (GUI)
 

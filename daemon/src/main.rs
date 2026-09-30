@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
+mod animation;
 mod idle;
 mod keepalive;
 
@@ -108,6 +109,24 @@ enum Command {
     },
     /// Print the keep-alive settings.
     GetKeepalive,
+    /// Start, change or stop the WASD animation. It runs in the background service, so it keeps
+    /// going after the GUI is closed; `--mode none` stops it and the saved static colors return.
+    SetAnimation {
+        #[arg(long, value_parser = ["none", "wheel", "knight", "hue", "chase", "breathe", "zone", "cascade"])]
+        mode: Option<String>,
+        /// Animation speed, 0.1 to 4.0 (1.0 = normal).
+        #[arg(long)]
+        speed: Option<f64>,
+    },
+    /// Print the animation settings.
+    GetAnimation,
+    /// Diagnostic: print one animation frame (36 values: R,G,B for the 12 zones) at time --t.
+    AnimationFrame {
+        #[arg(long)]
+        mode: String,
+        #[arg(long)]
+        t: f64,
+    },
     /// Run the keep-alive loop (what the ph18-lighting-keepalive service runs).
     KeepaliveRun,
     /// Diagnostic: print idle/active changes as seen through Wayland ext-idle-notify.
@@ -231,6 +250,9 @@ fn main() {
         Command::IdleProbe { idle_after, run_for } => idle_probe(idle_after, run_for),
         Command::SetKeepalive { mode, minutes, ac_only } => set_keepalive(mode, minutes, ac_only),
         Command::GetKeepalive => print_keepalive("get-keepalive", &keepalive::Config::load()),
+        Command::SetAnimation { mode, speed } => set_animation(mode, speed),
+        Command::GetAnimation => print_animation("get-animation", &animation::Config::load()),
+        Command::AnimationFrame { mode, t } => animation_frame(&mode, t),
         Command::KeepaliveRun => keepalive::run(),
         Command::SetMagkeyEmitters { colors } => set_magkey_emitters(&colors),
         Command::SetMagkeys { all } => set_magkeys(all),
@@ -476,6 +498,9 @@ fn paint_index_via_report84(
 }
 
 fn repaint_keyboard(state: &KeyboardState) -> io::Result<(PathBuf, PathBuf)> {
+    // A whole-board sweep is a long run of HID writes: keep the animation (and any other sweep)
+    // out of it, or their packets would interleave and garble the result.
+    let _hid = keepalive::hid_lock_exclusive()?;
     // The ff02 anchor with byte-0=0xff broadcast word paints every index
     // uniformly (no more "stubborn keys" workaround). Per-key overrides
     // land on top via report84/report86=0x01.
@@ -690,6 +715,57 @@ fn get_keyboard_state() -> io::Result<()> {
             println!("magkey={zone}:{r},{g},{b}");
         }
     }
+    Ok(())
+}
+
+fn set_animation(mode: Option<String>, speed: Option<f64>) -> io::Result<()> {
+    let bad = |m: &str| io::Error::new(io::ErrorKind::InvalidInput, m.to_string());
+    let new_mode = match mode.as_deref() {
+        None => None,
+        Some("none") => Some(None),
+        Some(m) => Some(Some(animation::Mode::parse(m).ok_or_else(|| bad("unknown animation"))?)),
+    };
+    if let Some(sp) = speed {
+        if !(animation::MIN_SPEED..=animation::MAX_SPEED).contains(&sp) {
+            return Err(bad("speed must be between 0.1 and 4.0"));
+        }
+    }
+    let current = animation::Config::load();
+    let next = current.updated(new_mode, speed, animation::now_ms());
+    next.save()?;
+
+    // An animation only makes sense while the lights stay on, and the firmware sleeps them after
+    // 30 s. Keep-alive "off" would make the animation stop with them, so turn it on (and say so).
+    if next.mode.is_some() {
+        let mut ka = keepalive::Config::load();
+        if ka.mode == keepalive::Mode::Off {
+            ka.mode = keepalive::Mode::Active;
+            ka.save()?;
+            println!("note=keep-alive was off; switched to active so the animation keeps running");
+        }
+    }
+    print_animation("set-animation", &next)
+}
+
+fn print_animation(action: &str, cfg: &animation::Config) -> io::Result<()> {
+    println!("action={action}");
+    println!("mode={}", cfg.mode.map(animation::Mode::as_str).unwrap_or("none"));
+    println!("speed={}", cfg.speed);
+    println!("epoch_ms={}", cfg.epoch_ms);
+    println!("phase0={}", cfg.phase0);
+    println!("keepalive_mode={}", keepalive::Config::load().mode.as_str());
+    Ok(())
+}
+
+fn animation_frame(mode: &str, t: f64) -> io::Result<()> {
+    let m = animation::Mode::parse(mode)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "unknown animation"))?;
+    let values: Vec<String> = animation::frame(m, t)
+        .iter()
+        .flat_map(|&(r, g, b)| [r, g, b])
+        .map(|v| v.to_string())
+        .collect();
+    println!("{}", values.join(","));
     Ok(())
 }
 
@@ -1543,6 +1619,10 @@ fn hex_string(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    /// Tests that point the daemon at a scratch HOME mutate a process-wide variable, and the test
+    /// runner uses several threads: hold this while HOME is overridden so they cannot overlap.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn report84_layout_blue_q() {
         // Q = index 39 (0x27), blue, mode=1, brightness=8.
@@ -1706,6 +1786,7 @@ mod tests {
 
     #[test]
     fn keyboard_state_file_round_trip() {
+        let _home_guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Point the daemon at a scratch HOME so we don't touch the real
         // cache file. save → load must give back the same {baseline, overrides}.
         let tmp = std::env::temp_dir().join(format!(
@@ -1752,6 +1833,7 @@ mod tests {
 
     #[test]
     fn keyboard_state_file_parses_legacy_named_baseline() {
+        let _home_guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Older state files (pre-broadcast-encoding refactor) wrote
         // `baseline=blue` instead of `baseline=0,0,255`. Loader must
         // accept both so an upgrade doesn't lose state.

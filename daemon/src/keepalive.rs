@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, SystemTime};
 
+use crate::animation;
 use crate::idle::IdleWatcher;
 
 /// How often the saved frame is re-sent. Well inside the firmware's 30 s.
@@ -233,22 +234,68 @@ pub struct Inputs {
     pub secs_since_magkey_write: u64,
 }
 
-/// Should the saved MagKey frame be re-sent right now?
-pub fn should_write(cfg: &Config, now: &Inputs) -> bool {
+/// Do the current settings want the lights on right now? (The keep-alive rewrite and the
+/// animation both follow this.)
+pub fn lights_should_be_on(cfg: &Config, idle: bool, on_ac: bool) -> bool {
     if cfg.mode == Mode::Off {
         return false;
     }
-    if cfg.ac_only && !now.on_ac {
-        return false;
-    }
-    if now.secs_since_magkey_write < RECENT_WRITE_SECS {
+    if cfg.ac_only && !on_ac {
         return false;
     }
     match cfg.mode {
         Mode::Always => true,
-        Mode::Active | Mode::Timeout => !now.idle,
+        Mode::Active | Mode::Timeout => !idle,
         Mode::Off => false,
     }
+}
+
+/// Should the saved MagKey frame be re-sent right now?
+pub fn should_write(cfg: &Config, now: &Inputs) -> bool {
+    // A frame written moments ago (e.g. by the animation) already keeps the lights awake.
+    if now.secs_since_magkey_write < RECENT_WRITE_SECS {
+        return false;
+    }
+    lights_should_be_on(cfg, now.idle, now.on_ac)
+}
+
+// ── A lock so HID writers never interleave ────────────────────────────────────────────
+// A whole-board sweep is a long run of packets and the animation streams a frame every 40 ms;
+// if both wrote at once the packets would mix. Sweeps take this lock exclusively (see
+// `repaint_keyboard`), and the animation takes it shared and non-blocking for each burst.
+
+/// Holds an flock; the lock is released when this is dropped (the file is closed).
+pub struct HidLock(#[allow(dead_code)] fs::File);
+
+fn hid_lock_path() -> PathBuf {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
+    dir.join("ph18-lighting-hid.lock")
+}
+
+fn open_hid_lock() -> io::Result<fs::File> {
+    fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(hid_lock_path())
+}
+
+fn flock(file: &fs::File, op: i32) -> bool {
+    use std::os::fd::AsRawFd;
+    // SAFETY: plain syscall on a file descriptor we own for the duration of the call.
+    unsafe { libc::flock(file.as_raw_fd(), op) == 0 }
+}
+
+/// Wait for, then hold, the exclusive HID lock (released when dropped).
+pub fn hid_lock_exclusive() -> io::Result<HidLock> {
+    let f = open_hid_lock()?;
+    if flock(&f, libc::LOCK_EX) {
+        Ok(HidLock(f))
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// Take the shared lock if no sweep is running; `None` means "a sweep is in progress, skip".
+fn hid_lock_shared_try() -> Option<HidLock> {
+    let f = open_hid_lock().ok()?;
+    flock(&f, libc::LOCK_SH | libc::LOCK_NB).then(|| HidLock(f))
 }
 
 fn config_mtime() -> Option<SystemTime> {
@@ -261,11 +308,69 @@ fn send_saved_frame() -> io::Result<()> {
     crate::apply_magkey_frame_raw(&crate::build_magkey_frame(&frame)).map(|_| ())
 }
 
+// ── Animation output ──────────────────────────────────────────────────────────────────
+
+const FRAME_PERIOD: Duration = Duration::from_millis(40); // 25 frames per second
+const BURST_FRAMES: u32 = 5; // re-read the settings every 200 ms
+
+/// The open connection to the MagKey controller for the animation: the init packets are sent
+/// once, then each frame is one 64-byte write plus the commit packet. Dropped on any error so the
+/// next burst finds the device again (it re-enumerates after suspend).
+struct AnimLink {
+    node: Option<PathBuf>,
+}
+
+impl AnimLink {
+    fn send(&mut self, frame: &animation::Frame) -> io::Result<()> {
+        let node = match &self.node {
+            Some(n) => n.clone(),
+            None => {
+                let n = crate::find_ff02_node()?;
+                for packet in crate::PKT_PRELUDE {
+                    crate::send_feature_ff02(&n, &packet)?;
+                }
+                self.node = Some(n.clone());
+                n
+            }
+        };
+        let result = crate::send_out64(&node, &crate::build_magkey_frame(frame))
+            .and_then(|_| crate::send_feature_ff02(&node, &crate::MAGKEY_COMMIT_PACKET));
+        if result.is_err() {
+            self.node = None;
+        }
+        result
+    }
+}
+
+/// Play `BURST_FRAMES` frames at 25 fps. Returns false if the device could not be written.
+fn animate_burst(link: &mut AnimLink, anim: &animation::Config, mode: animation::Mode) -> bool {
+    let Some(_lock) = hid_lock_shared_try() else {
+        std::thread::sleep(FRAME_PERIOD * BURST_FRAMES); // a sweep is running: wait it out
+        return true;
+    };
+    let start = std::time::Instant::now();
+    for n in 0..BURST_FRAMES {
+        let frame = animation::frame(mode, anim.t_at(animation::now_ms()));
+        if link.send(&frame).is_err() {
+            return false;
+        }
+        let target = start + FRAME_PERIOD * (n + 1);
+        if let Some(wait) = target.checked_duration_since(std::time::Instant::now()) {
+            std::thread::sleep(wait);
+        }
+    }
+    true
+}
+
 /// The long-running loop behind `keepalive-run`.
 pub fn run() -> io::Result<()> {
     let mut watcher: Option<(IdleWatcher, std::sync::mpsc::Receiver<()>)> = None;
     let mut watcher_error_logged = false;
     let mut last_state = String::new();
+    let mut link = AnimLink { node: None };
+    let mut was_animating = false;
+    let mut last_touch = std::time::Instant::now();
+    let mut link_error_logged = false;
 
     loop {
         let cfg = Config::load();
@@ -297,6 +402,52 @@ pub fn run() -> io::Result<()> {
             on_ac: on_ac_power(),
             secs_since_magkey_write: secs_since_magkey_write(),
         };
+        // ── An animation is selected: play it while the keep-alive rules want the lights on ──
+        let anim = animation::Config::load();
+        if let Some(mode) = anim.mode {
+            let on = lights_should_be_on(&cfg, inputs.idle, inputs.on_ac);
+            let state = format!(
+                "animation={} on={} keepalive={} idle={} ac={}",
+                mode.as_str(), on, cfg.mode.as_str(), inputs.idle, inputs.on_ac
+            );
+            if state != last_state {
+                println!("keepalive: {state}");
+                last_state = state;
+            }
+            was_animating = true;
+            if on {
+                if animate_burst(&mut link, &anim, mode) {
+                    link_error_logged = false;
+                    if last_touch.elapsed() >= Duration::from_secs(1) {
+                        touch_magkey_write();
+                        last_touch = std::time::Instant::now();
+                    }
+                } else {
+                    if !link_error_logged {
+                        eprintln!("keepalive: animation write failed (device busy or absent?); retrying");
+                        link_error_logged = true;
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            } else if let Some((_, rx)) = watcher.as_ref() {
+                // Lights are meant to sleep: idle, or on battery. Wake as soon as the user is back.
+                let _ = rx.recv_timeout(Duration::from_secs(1));
+            } else {
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            continue;
+        }
+        if was_animating {
+            // The animation was just turned off: bring back the saved static colors.
+            was_animating = false;
+            link.node = None;
+            last_state.clear();
+            match send_saved_frame() {
+                Ok(()) => touch_magkey_write(),
+                Err(e) => eprintln!("keepalive: could not restore the static colors: {e}"),
+            }
+        }
+
         let write = should_write(&cfg, &inputs);
 
         let state = format!(
@@ -320,6 +471,7 @@ pub fn run() -> io::Result<()> {
 
         // Sleep until the next tick, but wake early if the user becomes active
         // again (so sleeping lights come back right away) or the settings change.
+        let anim_stamp = animation_mtime();
         let mut waited = 0;
         while waited < TICK_SECS {
             if let Some((_, rx)) = watcher.as_ref() {
@@ -332,11 +484,16 @@ pub fn run() -> io::Result<()> {
                 std::thread::sleep(Duration::from_secs(1));
             }
             waited += 1;
-            if config_mtime() != cfg_stamp {
+            if config_mtime() != cfg_stamp || animation_mtime() != anim_stamp {
                 break;
             }
         }
     }
+}
+
+/// Modification time of the animation config, so starting or stopping one wakes the loop at once.
+fn animation_mtime() -> Option<std::time::SystemTime> {
+    animation::path().ok().and_then(|p| fs::metadata(p).ok()).and_then(|m| m.modified().ok())
 }
 
 #[cfg(test)]
@@ -349,6 +506,15 @@ mod tests {
 
     fn cfg(mode: Mode, ac_only: bool) -> Config {
         Config { mode, minutes: 5, ac_only }
+    }
+
+    #[test]
+    fn lights_policy_ignores_how_recently_we_wrote() {
+        // Used by the animation: it must not be gated by the "recent write" rule.
+        assert!(lights_should_be_on(&cfg(Mode::Always, false), false, true));
+        assert!(!lights_should_be_on(&cfg(Mode::Off, false), false, true));
+        assert!(!lights_should_be_on(&cfg(Mode::Active, false), true, true));
+        assert!(!lights_should_be_on(&cfg(Mode::Always, true), false, false));
     }
 
     #[test]

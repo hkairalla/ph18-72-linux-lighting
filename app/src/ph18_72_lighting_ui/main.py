@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import array
-import fcntl
 import os
 import shutil
 import subprocess
 import sys
-import threading
 import tomllib
-import time
 from pathlib import Path
 
 APP_ID = "ph18-lighting"
@@ -51,79 +47,10 @@ DAEMON_DIR = REPO_ROOT / "daemon"
 DAEMON_BIN = DAEMON_DIR / "target" / "debug" / "ph18-lighting-daemon"
 UI_INDEX   = APP_DIR / "ui" / "index.html"
 
-# ── HID constants ────────────────────────────────────────────────────
-TARGET_HID_ID = "0003:000005AF:0000866A"
-INIT_PACKETS  = [
-    bytes.fromhex("8800000000000077"),
-    bytes.fromhex("b10000000000004e"),
-    bytes.fromhex("08020000000000f5"),
-    bytes.fromhex("08024f0a3200006a"),
-    bytes.fromhex("14000100000000ea"),
-    bytes.fromhex("13000008000000e4"),
-]
-COMMIT_PACKET = bytes.fromhex("08024f0532080166")
-
-_IOC_NRBITS   = 8
-_IOC_TYPEBITS = 8
-_IOC_SIZEBITS = 14
-_IOC_NRSHIFT  = 0
-_IOC_TYPESHIFT = _IOC_NRSHIFT  + _IOC_NRBITS
-_IOC_SIZESHIFT = _IOC_TYPESHIFT + _IOC_TYPEBITS
-_IOC_DIRSHIFT  = _IOC_SIZESHIFT + _IOC_SIZEBITS
-_IOC_READ  = 2
-_IOC_WRITE = 1
-
-def _ioc(direction: int, type_char: str, number: int, size: int) -> int:
-    return (
-        (direction << _IOC_DIRSHIFT)
-        | (ord(type_char) << _IOC_TYPESHIFT)
-        | (number << _IOC_NRSHIFT)
-        | (size << _IOC_SIZESHIFT)
-    )
-
-def _hidiocsfeature(length: int) -> int:
-    return _ioc(_IOC_READ | _IOC_WRITE, "H", 0x06, length)
-
-def _find_ff02() -> Path:
-    for hidraw in sorted(Path("/sys/class/hidraw").glob("hidraw*")):
-        uevent = hidraw / "device" / "uevent"
-        if not uevent.exists():
-            continue
-        fields = dict(
-            line.split("=", 1)
-            for line in uevent.read_text().splitlines()
-            if "=" in line
-        )
-        if fields.get("HID_ID") != TARGET_HID_ID:
-            continue
-        descriptor = (hidraw / "device" / "report_descriptor").read_bytes()
-        if descriptor.startswith(bytes.fromhex("0602ff")):
-            return Path("/dev") / hidraw.name
-    raise FileNotFoundError("ff02 hidraw node not found for 05af:866a")
-
-def _send_feature(node: Path, payload: bytes) -> None:
-    buf = array.array("B", b"\x00" + payload)
-    with open(node, "rb+", buffering=0) as f:
-        fcntl.ioctl(f, _hidiocsfeature(len(buf)), buf, True)
-
-def _build_magkey_frame(emitters: list[list[int]]) -> bytes:
-    """emitters: 12 × [r, g, b]"""
-    frame = bytearray(64)
-    for i, (r, g, b) in enumerate(emitters):
-        frame[i * 4 + 2] = r
-        frame[i * 4 + 3] = g
-        frame[(i + 1) * 4] = b
-    return bytes(frame)
-
-
 # ── Python API (exposed to JS) ───────────────────────────────────────
 class Api:
     def __init__(self) -> None:
         self._backend = self._detect_backend()
-        self._hid_node: Path | None = None
-        self._hid_ready = False
-        self._lock = threading.Lock()
-        self._last_note = 0.0
         self._font_key: object = None
         self._font_family = ""
 
@@ -157,20 +84,6 @@ class Api:
         )
         output = "\n".join(filter(None, [result.stdout.strip(), result.stderr.strip()])) or "(no output)"
         return {"ok": result.returncode == 0, "title": title, "output": output}
-
-    def _note_magkey_write(self) -> None:
-        """Record a MagKey write (at most once a second) so the daemon's keep-alive
-        skips its own rewrite while an animation is already streaming frames."""
-        now = time.monotonic()
-        if now - self._last_note < 1.0:
-            return
-        self._last_note = now
-        try:
-            path = Path.home() / ".cache" / "ph18-lighting" / "last-magkey-write"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.touch()
-        except OSError:
-            pass
 
     def _system_mono_font(self) -> str:
         """The fontconfig `monospace` family, which is what Omarchy's shell draws in and what
@@ -285,29 +198,35 @@ class Api:
         keys = {name: overrides.get(index, baseline) for name, index in indices.items()}
         return {"baseline": baseline, "keys": keys, "magkeys": magkeys}
 
-    # ── Direct HID frame send (animation loop) ────────────────────────
-    def send_magkey_frame(self, emitters: list[list[int]]) -> str:
-        """Send 64-byte MagKey frame directly. Called at ~25fps from JS animation loop."""
+    def get_animation(self) -> dict:
+        """The MagKey animation the background service is running: {mode, speed, epoch_ms, phase0,
+        keepalive_mode, service_active}. mode is "none" when nothing is animating. The GUI only
+        previews it; the daemon owns the clock, so closing the GUI does not stop it."""
         if self._backend == "mock":
-            return "ok"
-
+            return {"mode": "none", "speed": 1.0, "epoch_ms": 0, "phase0": 0.0,
+                    "keepalive_mode": "active", "service_active": True}
+        cfg: dict = {}
+        for line in self._daemon_lines(["get-animation"]):
+            key, _, value = line.partition("=")
+            try:
+                if key in ("speed", "phase0"):
+                    cfg[key] = float(value)
+                elif key == "epoch_ms":
+                    cfg[key] = int(value)
+                elif key in ("mode", "keepalive_mode"):
+                    cfg[key] = value
+            except ValueError:
+                pass
+        if "mode" not in cfg:
+            return {}
         try:
-            with self._lock:
-                if not self._hid_ready:
-                    self._hid_node = _find_ff02()
-                    for pkt in INIT_PACKETS:
-                        _send_feature(self._hid_node, pkt)
-                    self._hid_ready = True
-
-                payload = _build_magkey_frame(emitters)
-                with open(self._hid_node, "wb", buffering=0) as f:
-                    os.write(f.fileno(), payload)
-                _send_feature(self._hid_node, COMMIT_PACKET)
-            self._note_magkey_write()
-            return "ok"
-        except Exception as e:
-            self._hid_ready = False  # force re-init on next call
-            return f"error: {e}"
+            probe = subprocess.run(
+                ["systemctl", "--user", "is-active", "ph18-lighting-keepalive.service"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False, timeout=3)
+            cfg["service_active"] = probe.stdout.strip() == "active"
+        except Exception:
+            cfg["service_active"] = None
+        return cfg
 
 
 def main() -> None:

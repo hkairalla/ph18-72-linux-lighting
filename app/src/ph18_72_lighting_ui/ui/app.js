@@ -9,7 +9,7 @@ const api = (() => {
     get_backend_mode:  () => Promise.resolve('mock'),
     get_history:       () => Promise.resolve([]),
     run_daemon:        (args) => Promise.resolve({ ok: true, title: args[0], output: `mock: ${args.join(' ')}` }),
-    send_magkey_frame: (_e)  => Promise.resolve('ok'),
+    get_animation: () => Promise.resolve({ mode: 'none', speed: 1, epoch_ms: 0, phase0: 0, keepalive_mode: 'active', service_active: true }),
     get_theme: () => Promise.resolve({}),
     get_keepalive: () => Promise.resolve({ mode: 'active', minutes: 5, ac_only: true, screensaver_seconds: 150, service_active: true }),
     get_keyboard_view: (names) => Promise.resolve({
@@ -110,11 +110,9 @@ const state = {
   emitterColors: Array.from({length:12}, () => [0,0,0]),
   animRunning: false,
   animMode: 'wheel',
-  animTime: 0,
-  animLastTs: null,
+  animEpoch: 0,
+  animPhase0: 0,
   animSpeed: 1.0,
-  hidBusy: false,
-  lastHidMs: 0,
 };
 
 /* ── Status bar ──────────────────────────────────────────────────────*/
@@ -330,11 +328,12 @@ async function refreshKeyColors() {
 
 /* ── MagKey frame send (always sends full 12-emitter state) ──────────*/
 // Static MagKey colors go through the daemon so they are saved and survive the
-// keyboard sweep, sleep and reboot. (Live animation frames use the fast direct
-// path in Python instead and are deliberately not saved.)
-function sendMagkeyFrame(_label) {
+// keyboard sweep, sleep and reboot. A running animation would overwrite them on its next
+// frame, so a static apply stops it first. (Animation frames are never saved.)
+async function sendMagkeyFrame(_label) {
   state.mkLastApplyMs = Date.now();
   const colors = state.emitterColors.flat().join(',');
+  if (state.animRunning) await stopAnim({ restore: false });
   return runDaemon(['set-magkey-emitters', '--colors', colors]);
 }
 
@@ -412,60 +411,83 @@ function updateAllEmitterSvg() {
   state.emitterColors.forEach(([r,g,b], i) => setEmitterSvg(i, r, g, b));
 }
 
-/* ── Animation loop ──────────────────────────────────────────────────*/
+/* ── Animation ───────────────────────────────────────────────────────
+   The background service (ph18-lighting-keepalive) plays the animation, so it keeps running
+   when this window closes. Here it is only a remote control plus a preview: the clock is the
+   daemon's (t = phase0 + (now - epoch) * speed), so the preview matches what the keys show. */
 function animLoop(ts) {
   if (!state.animRunning) return;
-  if (!state.animLastTs) state.animLastTs = ts;
-  const dt = (ts - state.animLastTs) / 1000;
-  state.animLastTs = ts;
-  state.animTime += dt * state.animSpeed;
-  const t = state.animTime;
-
-  const fn = MODES[state.animMode];
-  if (!fn) return;
-  const emitters = fn(t);
-
-  // Repaint the SVG at ~30 fps, not every display frame: WebKitGTK renders in
-  // software here, and repainting at 60-250 Hz kept the app near 100% of a core.
+  // Repaint at ~30 fps, not every display frame: WebKitGTK renders in software here, and
+  // repainting at 60-250 Hz kept the app near 100% of a core.
   if (ts - (state.lastSvgMs || 0) >= 33) {
     state.lastSvgMs = ts;
-    emitters.forEach(([r,g,b], i) => setEmitterSvg(i, r, g, b));
+    const t = Math.max(0, state.animPhase0 + (Date.now() - state.animEpoch) / 1000 * state.animSpeed);
+    const fn = MODES[state.animMode];
+    if (fn) fn(t).forEach(([r,g,b], i) => setEmitterSvg(i, r, g, b));
   }
-
-  // HID frame at ~25 fps — fire-and-forget, skip if previous in flight
-  if (!state.hidBusy && ts - state.lastHidMs > 40) {
-    state.hidBusy = true;
-    state.lastHidMs = ts;
-    api.send_magkey_frame(emitters)
-      .finally(() => { state.hidBusy = false; });
-  }
-
   requestAnimationFrame(animLoop);
 }
 
-function startAnim(mode) {
-  state.animMode    = mode;
+function showAnimRunning(running) {
+  const btn = document.getElementById('btn-anim');
+  btn.textContent = running ? '■ Stop' : '▶ Start';
+  btn.classList.toggle('running', running);
+  const tab = document.querySelector('.tab[data-panel="magkey"]');
+  if (tab) tab.classList.toggle('animating', running);
+}
+
+function beginPreview() {
+  const wasRunning = state.animRunning;
   state.animRunning = true;
-  state.animTime    = 0;
-  state.animLastTs  = null;
-  const btn = document.getElementById('btn-anim');
-  btn.textContent = '■ Stop';
-  btn.classList.add('running');
-  requestAnimationFrame(animLoop);
+  showAnimRunning(true);
+  if (!wasRunning) requestAnimationFrame(animLoop);
 }
 
-async function stopAnim() {
+// Adopt the daemon's animation state. Used at startup and on focus, so a window opened while an
+// animation is playing shows it, and one stopped from the CLI stops previewing.
+async function syncAnimation() {
+  let cfg;
+  try { cfg = await api.get_animation(); } catch (_) { return; }
+  if (!cfg || !cfg.mode) return;
+  const note = document.getElementById('anim-note');
+  if (note) {
+    const dead = cfg.mode !== 'none' && cfg.service_active === false;
+    note.hidden = !dead;
+  }
+  if (cfg.mode === 'none') {
+    if (state.animRunning) await stopAnim({ restore: true, send: false });
+    return;
+  }
+  if (!MODES[cfg.mode]) return;
+  state.animMode = cfg.mode;
+  state.animSpeed = cfg.speed;
+  state.animEpoch = cfg.epoch_ms;
+  state.animPhase0 = cfg.phase0;
+  const sel = document.getElementById('anim-select');
+  if (sel) sel.value = cfg.mode;
+  if (state.setDialSpeed) state.setDialSpeed(cfg.speed, { send: false });
+  beginPreview();
+}
+
+async function startAnim(mode) {
+  state.animMode = mode;
+  state.animEpoch = Date.now();
+  state.animPhase0 = 0;
+  beginPreview();
+  const r = await runDaemon(['set-animation', '--mode', mode, '--speed', state.animSpeed.toFixed(2)]);
+  // Adopt the daemon's clock (it stamped its own epoch).
+  if (r && r.ok) syncAnimation();
+}
+
+async function stopAnim({ restore = true, send = true } = {}) {
   state.animRunning = false;
-  state.animLastTs  = null;
-  const btn = document.getElementById('btn-anim');
-  btn.textContent = '▶ Start';
-  btn.classList.remove('running');
-  state.emitterColors = Array.from({length:12}, () => [0,0,0]);
-  updateAllEmitterSvg();
-  // Let an animation frame that is already in flight land first, so it cannot
-  // overwrite the "off" frame.
-  for (let i = 0; i < 20 && state.hidBusy; i++) await new Promise(r => setTimeout(r, 10));
-  sendMagkeyFrame('stop');
+  showAnimRunning(false);
+  if (send) await runDaemon(['set-animation', '--mode', 'none']);
+  if (restore) {
+    // The daemon re-sends the saved static colors; show them here too.
+    state.mkLastApplyMs = 0;
+    refreshKeyColors();
+  }
 }
 
 /* ── Slider helpers ──────────────────────────────────────────────────*/
@@ -935,8 +957,21 @@ function initSpeedDial() {
   const dotEl  = document.getElementById('dial-dot');
   const valEl  = document.getElementById('speed-val');
 
-  function setSpeed(speed) {
+  let speedTimer = null;
+  function setSpeed(speed, { send = true } = {}) {
     speed = Math.max(MIN, Math.min(MAX, speed));
+    if (state.animRunning && send) {
+      // Re-base the preview clock so the speed change is seamless, then tell the daemon once the
+      // dial stops moving (it re-bases its own clock the same way).
+      const now = Date.now();
+      state.animPhase0 = Math.max(0, state.animPhase0 + (now - state.animEpoch) / 1000 * state.animSpeed);
+      state.animEpoch = now;
+      clearTimeout(speedTimer);
+      speedTimer = setTimeout(async () => {
+        await runDaemon(['set-animation', '--speed', state.animSpeed.toFixed(2)]);
+        syncAnimation();
+      }, 250);
+    }
     state.animSpeed = speed;
     const t = (speed - MIN) / (MAX - MIN);
     fillEl.setAttribute('stroke-dasharray', `${(t * ARC_LEN).toFixed(2)} ${CIRC.toFixed(2)}`);
@@ -975,7 +1010,8 @@ function initSpeedDial() {
     setSpeed(state.animSpeed - e.deltaY * 0.004);
   }, { passive: false });
 
-  setSpeed(1.0);
+  state.setDialSpeed = setSpeed;
+  setSpeed(1.0, { send: false });
 }
 
 /* ── Backend badge ───────────────────────────────────────────────────*/
@@ -991,6 +1027,7 @@ async function initBackend() {
   refreshKeyColors();
   refreshKeepalive();
   refreshTheme();
+  syncAnimation();
 }
 
 /* ── Boot ────────────────────────────────────────────────────────────*/
@@ -1007,6 +1044,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initBackend();
   window.addEventListener('pywebviewready', initBackend);
   // The state can change outside the UI (CLI, restore service): resync on focus.
-  window.addEventListener('focus', () => { scheduleKeyColorRefresh(0); refreshKeepalive(); refreshTheme(); });
+  window.addEventListener('focus', () => { scheduleKeyColorRefresh(0); refreshKeepalive(); refreshTheme(); syncAnimation(); });
   setInterval(refreshTheme, 3000);   // pick up `omarchy theme set` while the window is open
 });

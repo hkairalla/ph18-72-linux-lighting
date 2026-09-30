@@ -252,6 +252,8 @@ ph18-lighting-daemon get-keyboard-state
 ph18-lighting-daemon set-magkey-whole-key --key w --color blue
 ph18-lighting-daemon set-magkey-zones --key a --left 255,0,0 --top 0,255,0 --right 0,0,255
 ph18-lighting-daemon set-magkey-emitters --colors 0,180,255,0,180,255,...   # all 12 zones (36 values), what the UI uses
+ph18-lighting-daemon set-animation --mode wheel --speed 1.5   # plays in the background service, survives closing the GUI
+ph18-lighting-daemon set-animation --mode none                # stop; saved colors return
 
 # Light sleep timer (see "Keep the lights on")
 ph18-lighting-daemon set-keepalive --mode active

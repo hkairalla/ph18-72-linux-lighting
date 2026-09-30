@@ -281,6 +281,8 @@
             <option value="cascade">Cascade</option>
           </select>
           <button class="btn-anim" id="btn-anim">▶ Start</button>
+          <div class="anim-hint">Runs in the background service, so it keeps playing after you close this window.</div>
+          <div class="anim-hint warn" id="anim-note" hidden>The background service is not running, so nothing is playing. Start it: systemctl --user start ph18-lighting-keepalive</div>
           <div class="divider"></div>
           <div class="section-label">Speed</div>
           <div class="dial-row">
