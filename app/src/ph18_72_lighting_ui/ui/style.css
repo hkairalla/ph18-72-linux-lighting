@@ -554,6 +554,46 @@ body {
   stroke-width: 2;
 }
 
+/* ── Keep-alive card ───────────────────────────────────────────────── */
+.btn-row .btn-preset { white-space: nowrap; }
+.btn-preset.selected {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text);
+}
+.ka-minutes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.ka-minutes[hidden] { display: none; }
+.ka-minutes input[type="number"] {
+  width: 64px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  color-scheme: dark;
+}
+.ka-minutes input[type="number"]:focus { outline: none; border-color: var(--accent); }
+.ka-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.ka-check input { accent-color: var(--accent); }
+.sidebar-note.warn { color: #e6a23c; }
+
 /* ── Keyboard grid ─────────────────────────────────────────────────── */
 .keyboard-main {
   padding: 16px;

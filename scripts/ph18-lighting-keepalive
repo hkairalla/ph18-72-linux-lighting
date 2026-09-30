@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Start the keep-alive loop with the newest daemon build (release, debug, or ~/.local/bin).
+set -u
+REPO_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+best=""; best_mtime=0
+for c in "$HOME/.local/bin/ph18-lighting-daemon" \
+         "$REPO_ROOT/daemon/target/release/ph18-lighting-daemon" \
+         "$REPO_ROOT/daemon/target/debug/ph18-lighting-daemon"; do
+  [[ -x "$c" ]] || continue
+  m="$(stat -c %Y "$c")"
+  if (( m > best_mtime )); then best="$c"; best_mtime=$m; fi
+done
+[[ -n "$best" ]] || { echo "ph18-lighting-keepalive: no daemon binary found" >&2; exit 1; }
+exec "$best" keepalive-run

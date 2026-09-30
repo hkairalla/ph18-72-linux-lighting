@@ -67,6 +67,21 @@
           </div>
           <div class="sidebar-note">Changing baseline clears per-key overrides.</div>
           <button class="btn-secondary" id="btn-kb-reset" style="margin-top:8px;">Reset Overrides</button>
+          <div class="divider"></div>
+          <div class="section-label">Keep lights on</div>
+          <div class="btn-row" id="ka-modes">
+            <button class="btn-preset" data-ka-mode="off"     title="Firmware default: the lights sleep 30 seconds after the last key press on the laptop">30 s</button>
+            <button class="btn-preset" data-ka-mode="active"  title="Stay on while you are using the computer, including the external keyboard">Active</button>
+            <button class="btn-preset" data-ka-mode="timeout" title="Stay on until you have been idle for a number of minutes">Timeout</button>
+            <button class="btn-preset" data-ka-mode="always"  title="Never go to sleep">Always</button>
+          </div>
+          <div class="ka-minutes" id="ka-minutes-row" hidden>
+            <label for="ka-minutes">Idle minutes</label>
+            <input type="number" id="ka-minutes" min="1" max="1440" value="5">
+            <button class="btn-small" id="ka-minutes-set">Set</button>
+          </div>
+          <label class="ka-check"><input type="checkbox" id="ka-ac-only" checked> Only on AC power</label>
+          <div class="sidebar-note" id="ka-note">—</div>
         </div>
       </div>
 

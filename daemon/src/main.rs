@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
+mod idle;
+mod keepalive;
+
 const TARGET_HID_ID: &str = "0003:000005AF:0000866A";
 const DARFON_HID_ID: &str = "0003:00000D62:0000BA51";
 const REPORT_DESCRIPTOR_PREFIX: [u8; 3] = [0x06, 0x02, 0xff];
@@ -90,6 +93,32 @@ enum Command {
     },
     /// Print the current persisted keyboard state.
     GetKeyboardState,
+    /// Choose how long the keyboard/MagKey lights stay on (the firmware sleeps them after 30 s).
+    SetKeepalive {
+        /// off = firmware default; active = on while you are using the computer;
+        /// always = never sleep; timeout = on until idle for --minutes.
+        #[arg(long, value_parser = ["off", "active", "always", "timeout"])]
+        mode: Option<String>,
+        /// Idle minutes before the lights may sleep (timeout mode), 1-1440.
+        #[arg(long)]
+        minutes: Option<u32>,
+        /// Only keep the lights on while on AC power (true/false).
+        #[arg(long)]
+        ac_only: Option<bool>,
+    },
+    /// Print the keep-alive settings.
+    GetKeepalive,
+    /// Run the keep-alive loop (what the ph18-lighting-keepalive service runs).
+    KeepaliveRun,
+    /// Diagnostic: print idle/active changes as seen through Wayland ext-idle-notify.
+    IdleProbe {
+        /// Seconds without input before the session counts as idle.
+        #[arg(long, default_value_t = 5)]
+        idle_after: u64,
+        /// How long to watch, in seconds.
+        #[arg(long, default_value_t = 30)]
+        run_for: u64,
+    },
     /// Print `name=index` for each key name (`none` if the daemon has no such key).
     KeyboardKeyIndices {
         #[arg(required = true)]
@@ -199,6 +228,10 @@ fn main() {
         Command::ProbeKeyboardWord { word } => probe_keyboard_word(&word),
         Command::GetKeyboardState => get_keyboard_state(),
         Command::KeyboardKeyIndices { keys } => keyboard_key_indices(&keys),
+        Command::IdleProbe { idle_after, run_for } => idle_probe(idle_after, run_for),
+        Command::SetKeepalive { mode, minutes, ac_only } => set_keepalive(mode, minutes, ac_only),
+        Command::GetKeepalive => print_keepalive("get-keepalive", &keepalive::Config::load()),
+        Command::KeepaliveRun => keepalive::run(),
         Command::SetMagkeyEmitters { colors } => set_magkey_emitters(&colors),
         Command::SetMagkeys { all } => set_magkeys(all),
         Command::SetMagkeysPattern {
@@ -660,6 +693,56 @@ fn get_keyboard_state() -> io::Result<()> {
     Ok(())
 }
 
+fn set_keepalive(mode: Option<String>, minutes: Option<u32>, ac_only: Option<bool>) -> io::Result<()> {
+    let mut cfg = keepalive::Config::load();
+    if let Some(m) = mode {
+        cfg.mode = keepalive::Mode::parse(&m)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "mode must be off, active, always or timeout"))?;
+    }
+    if let Some(v) = minutes {
+        if !(1..=1440).contains(&v) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "minutes must be between 1 and 1440"));
+        }
+        cfg.minutes = v;
+    }
+    if let Some(a) = ac_only {
+        cfg.ac_only = a;
+    }
+    cfg.save()?;
+    print_keepalive("set-keepalive", &cfg)
+}
+
+fn print_keepalive(action: &str, cfg: &keepalive::Config) -> io::Result<()> {
+    println!("action={action}");
+    println!("mode={}", cfg.mode.as_str());
+    println!("minutes={}", cfg.minutes);
+    println!("ac_only={}", cfg.ac_only);
+    println!("screensaver_seconds={}", keepalive::omarchy_screensaver_secs());
+    match cfg.idle_threshold_secs() {
+        Some(secs) => println!("idle_threshold_seconds={secs}"),
+        None => println!("idle_threshold_seconds=none"),
+    }
+    Ok(())
+}
+
+fn idle_probe(idle_after: u64, run_for: u64) -> io::Result<()> {
+    let (mut watcher, _resumed) = idle::IdleWatcher::start()?;
+    watcher.watch(std::time::Duration::from_secs(idle_after))?;
+    println!("ext-idle-notify version {} ({}); idle after {idle_after}s of no input, watching {run_for}s",
+        watcher.protocol_version(), if watcher.protocol_version() >= 2 { "input idle, ignores inhibitors" } else { "plain idle, inhibitors can block it" });
+    let start = std::time::Instant::now();
+    let mut last = false;
+    while start.elapsed().as_secs() < run_for {
+        let now = watcher.is_idle();
+        if now != last {
+            println!("t={:>5.1}s  {}", start.elapsed().as_secs_f32(), if now { "IDLE" } else { "active" });
+            last = now;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Ok(())
+}
+
 fn keyboard_key_indices(keys: &[String]) -> io::Result<()> {
     for key in keys {
         match keyboard_key_index(key) {
@@ -879,6 +962,7 @@ fn apply_magkey_frame_raw(payload: &[u8; 64]) -> io::Result<(PathBuf, [u8; 64])>
     }
     send_out64(&node, payload)?;
     send_feature_ff02(&node, &MAGKEY_COMMIT_PACKET)?;
+    keepalive::touch_magkey_write();
     Ok((node, *payload))
 }
 

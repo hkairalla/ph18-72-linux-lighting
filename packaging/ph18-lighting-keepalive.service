@@ -1,0 +1,19 @@
+[Unit]
+Description=Keep PH18-72 keyboard and WASD lights on (see the GUI's "Keep lights on" card)
+# The firmware turns the lights off 30 s after the last laptop key press. This
+# rewrites the saved MagKey frame now and then, following the mode chosen with
+# `ph18-lighting-daemon set-keepalive` (off / active / always / timeout).
+# It needs the Wayland session (to watch for idle time), so it starts with it.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# Uses the newest daemon build; override ExecStart= in a drop-in
+# (`systemctl --user edit ph18-lighting-keepalive.service`) if the repo lives elsewhere.
+ExecStart=%h/Projects/ph18-72-linux-lighting/scripts/ph18-lighting-keepalive
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

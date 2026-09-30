@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 APP_ID = "ph18-lighting"
@@ -121,6 +122,7 @@ class Api:
         self._hid_node: Path | None = None
         self._hid_ready = False
         self._lock = threading.Lock()
+        self._last_note = 0.0
 
     def _detect_backend(self) -> str:
         requested = os.environ.get("PH18_UI_BACKEND", "").strip().lower()
@@ -152,6 +154,45 @@ class Api:
         )
         output = "\n".join(filter(None, [result.stdout.strip(), result.stderr.strip()])) or "(no output)"
         return {"ok": result.returncode == 0, "title": title, "output": output}
+
+    def _note_magkey_write(self) -> None:
+        """Record a MagKey write (at most once a second) so the daemon's keep-alive
+        skips its own rewrite while an animation is already streaming frames."""
+        now = time.monotonic()
+        if now - self._last_note < 1.0:
+            return
+        self._last_note = now
+        try:
+            path = Path.home() / ".cache" / "ph18-lighting" / "last-magkey-write"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        except OSError:
+            pass
+
+    def get_keepalive(self) -> dict:
+        """Keep-alive settings plus whether its background service is running."""
+        if self._backend == "mock":
+            return {"mode": "active", "minutes": 5, "ac_only": True,
+                    "screensaver_seconds": 150, "service_active": True}
+        cfg: dict = {}
+        for line in self._daemon_lines(["get-keepalive"]):
+            key, _, value = line.partition("=")
+            if key in ("mode",):
+                cfg[key] = value
+            elif key in ("minutes", "screensaver_seconds"):
+                cfg[key] = int(value) if value.isdigit() else 0
+            elif key == "ac_only":
+                cfg[key] = value == "true"
+        if "mode" not in cfg:
+            return {}
+        try:
+            probe = subprocess.run(
+                ["systemctl", "--user", "is-active", "ph18-lighting-keepalive.service"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False, timeout=3)
+            cfg["service_active"] = probe.stdout.strip() == "active"
+        except Exception:
+            cfg["service_active"] = None   # unknown: do not nag
+        return cfg
 
     def _daemon_lines(self, args: list[str]) -> list[str]:
         result = self.run_daemon(args)
@@ -215,6 +256,7 @@ class Api:
                 with open(self._hid_node, "wb", buffering=0) as f:
                     os.write(f.fileno(), payload)
                 _send_feature(self._hid_node, COMMIT_PACKET)
+            self._note_magkey_write()
             return "ok"
         except Exception as e:
             self._hid_ready = False  # force re-init on next call

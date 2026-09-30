@@ -27,6 +27,20 @@ same state file and re-sends it after every ff02 sweep (which would otherwise
 wipe WASD). `set-magkey-emitters --colors <36 values>` is the UI's static-apply
 path; animation frames use the direct Python path and are not saved.
 
+## Keep-alive (light sleep timer)
+
+The firmware sleeps the keyboard + WASD lights 30 s after the last key press on the
+laptop keyboard. A MagKey frame write wakes them and resets that timer; a per-key
+(`report84`) write does neither. `daemon/src/keepalive.rs` uses this: the
+`keepalive-run` loop (user service `ph18-lighting-keepalive`) re-sends the saved
+MagKey frame every 20 s according to `~/.config/ph18-lighting/keepalive.conf`
+(`off | active | always | timeout`, `minutes`, `ac_only`; CLI `set-keepalive` /
+`get-keepalive`). Idle time comes from `daemon/src/idle.rs` (Wayland ext-idle-notify v2,
+input idle, ignores inhibitors). Every MagKey write touches
+`~/.cache/ph18-lighting/last-magkey-write`; the loop skips its own write if one
+happened in the last 15 s (the UI's live animation streams frames directly).
+The decision rule is a pure function (`should_write`) with unit tests.
+
 ## Per-key keyboard model
 
 The firmware silently ignores `report84` per-key writes when the keyboard is

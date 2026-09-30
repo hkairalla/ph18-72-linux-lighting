@@ -95,6 +95,38 @@ If your session does not pick up the new ACLs immediately, log out and back
 in once. The rule uses `uaccess`, so only the logged-in seat user gets access
 to the hidraw nodes.
 
+### Keep the lights on (beat the 30 s sleep)
+
+The firmware turns the keyboard and WASD lights off 30 s after the last key press
+on the **laptop** keyboard (the external keyboard does not count). A MagKey frame
+write wakes them and restarts that timer, so a background service rewrites the
+saved MagKey frame (invisible: same colors) to hold them on. Choose the rule in the
+GUI (Keyboard page, "Keep lights on") or the CLI:
+
+```bash
+ph18-lighting-daemon set-keepalive --mode active            # on while you use the computer
+ph18-lighting-daemon set-keepalive --mode timeout --minutes 10   # on until idle for 10 min
+ph18-lighting-daemon set-keepalive --mode always            # never sleep
+ph18-lighting-daemon set-keepalive --mode off               # firmware default (30 s)
+ph18-lighting-daemon set-keepalive --ac-only true           # default: only on AC power
+ph18-lighting-daemon get-keepalive
+```
+
+`active` uses your Omarchy screensaver delay (`idle.screensaver` in
+`~/.config/omarchy/shell.json`, 150 s by default) as its idle threshold. Idle time comes
+from the Wayland `ext-idle-notify` protocol, so input from any device counts, and the
+lights come back the moment you touch anything. Settings live in
+`~/.config/ph18-lighting/keepalive.conf`. Install the service once:
+
+```bash
+cargo build --release --manifest-path daemon/Cargo.toml
+cp packaging/ph18-lighting-keepalive.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ph18-lighting-keepalive.service
+```
+
+The service does nothing while the mode is `off`.
+
 ### Repaint after suspend/resume
 
 The keyboard controller loses its colors when the machine sleeps and the

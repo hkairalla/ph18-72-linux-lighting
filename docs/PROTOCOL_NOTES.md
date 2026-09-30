@@ -136,3 +136,42 @@ one succeeds.
 - Infinity Mirror path.
 - A general formula for ff02 commit33 words at arbitrary RGB (only the four
   baseline words above are confirmed).
+
+
+## Backlight sleep timer and Acer WMI (findings, 2026-09)
+
+**Timer.** Keyboard + WASD lights sleep 30 s after the last key press on the built-in
+keyboard (measured +29.5 s). External-keyboard input does not count. Measured effects
+on the timer (lights-off time after waking the keyboard with a key press):
+
+| Action while lights are on | Lights went off at |
+| --- | --- |
+| nothing (control) | +29.5 s |
+| per-key write (`report84`) at +20 s | ~+30 s (no reset) |
+| MagKey frame write at +20 s | +55 s (reset) |
+
+While the lights are off: a per-key write does not wake them; a MagKey frame write or a
+full repaint does. The keep-alive feature is built on this.
+
+**Not readable.** Nothing on the keyboard HID nodes reports the displayed colors:
+feature reports `0x81`-`0x86` stall (`EPIPE`), `0x5A` returns a constant block, and the
+ff02 node's 8-byte feature read returns a fixed echo that does not change with color.
+
+**Acer WMI (gaming interface).** The firmware's own description (BMOF, decoded with
+pali/bmfdec) lists class `AcerGamingFunction` (GUID `7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56`)
+with methods 1-25 (profile, LED, RGB keyboard `SetGamingRgbKb` 6/7, `SetGamingKBBacklight`
+20/21, `SetGamingMiscSetting` 22/23, fan, overclock) and `BatteryControl`. It is object
+`BH` on `\_SB.PC00.WMID`, i.e. ACPI method `\_SB.PC00.WMID.WMBH(instance, method, input)`.
+Methods 20-23 end in `WSMI` (an SMI into BIOS), so the payload format is not visible in
+ASL. No kernel driver binds it; `acpi_call` can reach it (root only).
+
+`GetGamingMiscSetting` (method 23, input = setting index) returns `{status, value, ...}`;
+`SetGamingMiscSetting` (22) takes `index | (value << 8)` (value in the second byte,
+confirmed by readback). Valid settings on the PH18-72: `0x01`=0, `0x02`=3, `0x06`=1,
+`0x07`=0xff, `0x08`=1, `0x09`=7, `0x0A`=0x73 (supported performance profiles bitmask),
+`0x0B`=1 (performance profile); the rest report "unsupported". In Acer's published
+layout `0x05`/`0x07` are overclocking and `0x0B` is the performance profile (setting it
+also reprograms NVIDIA power limits): do not write those. Setting `0x06` or `0x08` to 0
+did **not** change the 30 s sleep timer (each was restored and verified), so the timer
+is not controlled there. The keyboard-backlight Get (method 21) returns a record with
+brightness 0x64, not a timeout.

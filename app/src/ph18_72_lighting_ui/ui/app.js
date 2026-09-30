@@ -10,6 +10,7 @@ const api = (() => {
     get_history:       () => Promise.resolve([]),
     run_daemon:        (args) => Promise.resolve({ ok: true, title: args[0], output: `mock: ${args.join(' ')}` }),
     send_magkey_frame: (_e)  => Promise.resolve('ok'),
+    get_keepalive: () => Promise.resolve({ mode: 'active', minutes: 5, ac_only: true, screensaver_seconds: 150, service_active: true }),
     get_keyboard_view: (names) => Promise.resolve({
       baseline: [0, 0, 255],
       keys: Object.fromEntries(names.map(n => [n, n === 'q' ? [255, 60, 60] : n === 'e' ? [60, 255, 90] : [0, 0, 255]])),
@@ -284,6 +285,57 @@ async function runDaemon(args) {
   setStatus(result.ok ? result.title + ' — ok' : result.title + ' — failed', result.ok ? 'ok' : 'err');
   if (KEYBOARD_CMDS.has(args[0])) scheduleKeyColorRefresh();
   return result;
+}
+
+/* ── Keep lights on (keyboard + WASD sleep timer) ────────────────────
+   The firmware sleeps the lights 30 s after the last laptop key press. The daemon's
+   keep-alive service rewrites the saved MagKey frame to hold them on; the mode
+   decides when it does. Settings live in the daemon (set-keepalive). */
+function kaDescribe(cfg) {
+  const mins = Math.round(cfg.screensaver_seconds / 6) / 10;   // seconds -> minutes, 1 decimal
+  switch (cfg.mode) {
+    case 'active':  return `Lights stay on while you use the computer and sleep after ${mins} min idle (your screensaver delay).`;
+    case 'timeout': return `Lights stay on until you have been idle for ${cfg.minutes} min.`;
+    case 'always':  return 'Lights never go to sleep.';
+    default:        return 'Firmware default: lights sleep 30 s after the last key press on the laptop.';
+  }
+}
+
+async function refreshKeepalive() {
+  if (!BROWSER_DEV && !(window.pywebview && window.pywebview.api)) return;
+  let cfg;
+  try { cfg = await api.get_keepalive(); } catch (err) { console.warn('keepalive read failed', err); return; }
+  if (!cfg || !cfg.mode) return;
+  document.querySelectorAll('#ka-modes [data-ka-mode]').forEach(b =>
+    b.classList.toggle('selected', b.dataset.kaMode === cfg.mode));
+  document.getElementById('ka-minutes-row').hidden = cfg.mode !== 'timeout';
+  const minutes = document.getElementById('ka-minutes');
+  if (document.activeElement !== minutes) minutes.value = cfg.minutes;
+  document.getElementById('ka-ac-only').checked = !!cfg.ac_only;
+  const note = document.getElementById('ka-note');
+  const needsService = cfg.mode !== 'off' && cfg.service_active === false;
+  note.textContent = kaDescribe(cfg) + (needsService
+    ? ' The keep-alive service is not running: systemctl --user enable --now ph18-lighting-keepalive.service'
+    : '');
+  note.classList.toggle('warn', needsService);
+}
+
+function initKeepalive() {
+  document.querySelectorAll('#ka-modes [data-ka-mode]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await runDaemon(['set-keepalive', '--mode', btn.dataset.kaMode]);
+      refreshKeepalive();
+    });
+  });
+  document.getElementById('ka-minutes-set').addEventListener('click', async () => {
+    const n = Math.max(1, Math.min(1440, parseInt(document.getElementById('ka-minutes').value, 10) || 5));
+    await runDaemon(['set-keepalive', '--minutes', n]);
+    refreshKeepalive();
+  });
+  document.getElementById('ka-ac-only').addEventListener('change', async ev => {
+    await runDaemon(['set-keepalive', '--ac-only', ev.target.checked ? 'true' : 'false']);
+    refreshKeepalive();
+  });
 }
 
 /* ── Key colors: show what the keyboard is displaying ────────────────
@@ -918,6 +970,7 @@ async function initBackend() {
     }
   } catch (_) {}
   refreshKeyColors();
+  refreshKeepalive();
 }
 
 /* ── Boot ────────────────────────────────────────────────────────────*/
@@ -925,6 +978,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initHistory();
   initKeyboardPanel();
+  initKeepalive();
   initMagkeyPanel();
   initCoverPanel();
   initSpeedDial();
@@ -934,5 +988,5 @@ document.addEventListener('DOMContentLoaded', () => {
   initBackend();
   window.addEventListener('pywebviewready', initBackend);
   // The state can change outside the UI (CLI, restore service): resync on focus.
-  window.addEventListener('focus', () => scheduleKeyColorRefresh(0));
+  window.addEventListener('focus', () => { scheduleKeyColorRefresh(0); refreshKeepalive(); });
 });
