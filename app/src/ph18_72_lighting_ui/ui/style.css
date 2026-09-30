@@ -668,12 +668,32 @@ body {
   cursor: not-allowed;
   border-style: dashed;
 }
-.kb-key.kb-magkey:hover {
+.kb-key.kb-magkey.mk-lit {
+  opacity: 1;
+  border: 1px solid transparent;
+  /* Gradient border: a card-colored fill on the padding box, the zone gradient behind it. */
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    linear-gradient(90deg, rgb(var(--mk-l) / 0.75), rgb(var(--mk-t) / 0.75), rgb(var(--mk-r) / 0.75)) border-box;
+  box-shadow:
+    inset 0 0 calc(var(--cell) * 1.2) rgb(var(--mk-t) / 0.14),
+    0 0 calc(var(--cell) * 0.9) rgb(var(--mk-t) / 0.12);
+}
+.kb-key.kb-magkey.mk-lit .lbl {
+  display: inline-block;
+  background: linear-gradient(90deg, var(--mkt-l), var(--mkt-t), var(--mkt-r));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 calc(var(--cell) * 0.5) rgb(var(--mk-t) / 0.65));
+}
+.kb-key.kb-magkey:not(.mk-lit):hover {
   /* Override the generic hover so MagKey buttons stay visually inert. */
   border-color: var(--border);
   color: var(--text-dim);
   background: var(--bg-card);
 }
+.kb-key.kb-magkey.mk-lit:hover { border-color: transparent; }
 
 /* Drag-box multi-select overlay. Positioned in viewport (fixed) by JS as
    the user drags from anywhere over the keyboard area. */

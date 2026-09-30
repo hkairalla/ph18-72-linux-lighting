@@ -25,7 +25,9 @@ reverse-engineering scratchwork lives under git-ignored `testing/`.
 The daemon saves the last MagKey frame as `magkey=<zone>:r,g,b` lines in the
 same state file and re-sends it after every ff02 sweep (which would otherwise
 wipe WASD). `set-magkey-emitters --colors <36 values>` is the UI's static-apply
-path; animation frames use the direct Python path and are not saved.
+path; animation frames use the direct Python path and are not saved. The WASD keys on the Keyboard page
+are read-only but show the current MagKey colors (a gradient across each key's left/top/right zones,
+class `mk-lit`), painted from `updateKeyLabel()` so the two pages always agree.
 
 ## Keep-alive (light sleep timer)
 

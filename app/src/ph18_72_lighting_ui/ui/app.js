@@ -509,16 +509,35 @@ function updateKeyLabel(key) {
   label.classList.toggle('lit', lit);
   label.style.fill = lit ? `url(#klg-${key})` : '';
   label.style.stroke = lit ? `url(#klg-${key})` : '';
+  // Raw zone colors (null when a zone is dark), shared by the MagKey page and the Keyboard page.
+  const rgbs = zones.map(z => (z && z.classList.contains('lit')) ? z.dataset.rgb.split(',').map(Number) : null);
+  // Lift toward white (black on light themes) a little so pure blues stay readable.
+  const target = state.themeLight ? 0 : 255;
+  const lift = c => Math.round(c + (target - c) * 0.22);
+  const lifted = rgbs.map(c => c ? `rgb(${lift(c[0])} ${lift(c[1])} ${lift(c[2])})` : null);
+  if (lit) {
+    zones.forEach((z, i) => {
+      const stop = document.getElementById(`kls-${key}-${i}`);
+      if (stop) stop.style.stopColor = lifted[i] || 'rgb(40 60 75)';
+    });
+  }
+  // Mirror onto the Keyboard page's (read-only) WASD key. While an animation runs on another
+  // page that would repaint four hidden keys 30 times a second for nothing, so skip it then;
+  // switching back to the Keyboard page re-syncs (see initTabs).
+  if (!state.animRunning || state.panel === 'keyboard') paintMagkeyOnKeyboard(key, rgbs, lifted);
+}
+
+// The WASD keys on the Keyboard page are MagKeys: not editable there, but they show what the
+// MagKey page has set, as a gradient across the key's left / top / right zone colors.
+function paintMagkeyOnKeyboard(key, rgbs, lifted) {
+  const btn = document.querySelector(`.kb-key.kb-magkey[data-name="${key}"]`);
+  if (!btn) return;
+  const lit = rgbs.some(Boolean);
+  btn.classList.toggle('mk-lit', lit);
   if (!lit) return;
-  zones.forEach((z, i) => {
-    const stop = document.getElementById(`kls-${key}-${i}`);
-    if (!stop) return;
-    const on = z && z.classList.contains('lit');
-    const [r, g, b] = on ? z.dataset.rgb.split(',').map(Number) : [40, 60, 75];
-    // Lift toward white a little so pure blues stay readable on the dark body.
-    const target = state.themeLight ? 0 : 255;
-    const lift = c => Math.round(c + (target - c) * 0.22);
-    stop.style.stopColor = on ? `rgb(${lift(r)} ${lift(g)} ${lift(b)})` : `rgb(${r} ${g} ${b})`;
+  ['l', 't', 'r'].forEach((side, i) => {
+    btn.style.setProperty(`--mk-${side}`, (rgbs[i] || [40, 60, 75]).join(' '));
+    btn.style.setProperty(`--mkt-${side}`, lifted[i] || 'rgb(40 60 75)');
   });
 }
 function updateAllEmitterSvg() {
@@ -625,7 +644,15 @@ function _initKeyboardPanelBody() {
     const isMagkey = k.kind === 'magkey';
     btn.className = 'kb-key' + (isMagkey ? ' kb-magkey' : '') + (k.fcls ? ' ' + k.fcls : '');
     btn.type = 'button';
-    btn.textContent = k.label;
+    if (isMagkey) {
+      // The legend sits in a span so it can be filled with the key's zone colors (see paintMagkeyOnKeyboard).
+      const span = document.createElement('span');
+      span.className = 'lbl';
+      span.textContent = k.label;
+      btn.appendChild(span);
+    } else {
+      btn.textContent = k.label;
+    }
     // Size the legend to fit the key: monospace glyphs are ~0.62em wide, plus a little padding.
     btn.style.setProperty('--fit', (k.span / (k.label.length * 0.62 + 0.8)).toFixed(3));
     btn.dataset.name = k.name;
@@ -956,6 +983,7 @@ function initTabs() {
       const el = document.getElementById(`panel-${panel}`);
       if (el) el.classList.add('active');
       state.panel = panel;
+      if (panel === 'keyboard') ['w', 'a', 's', 'd'].forEach(updateKeyLabel);
       // Shift background glow tint per panel
       const tints = {
         keyboard: 'rgb(var(--accent-rgb) / 0.055)',
