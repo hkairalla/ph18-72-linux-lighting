@@ -5,6 +5,30 @@ Linux lighting control for the **Acer Predator Helios 18 PH18-72**.
 This is the clean public product repo. Reverse-engineering captures, scratch
 scripts, and packet logs are kept out of Git (`testing/` is git-ignored).
 
+## Which parts do you need?
+
+The repo is layered, so you can take as little or as much as you want:
+
+| You want... | Use | Read |
+| --- | --- | --- |
+| **Just control the lights on any Linux** | The **Rust daemon** (`daemon/`) plus the **udev rule** (`packaging/70-ph18-72-lighting.rules`). These two are the essential core; everything else calls them. | [docs/PORTABILITY.md](docs/PORTABILITY.md) |
+| A GUI, login/resume repaint, and the keep-lights-on timer on another distro or desktop | The optional layers (`app/`, the systemd units, the keep-alive) and the porting checklist. | [docs/PORTABILITY.md](docs/PORTABILITY.md) |
+| **The full setup on Omarchy** (Arch + Hyprland + Wayland) | `omarchy/install.sh`: builds everything, installs the udev rule, services, app-menu entry and Hyprland window rule. A worked example you can adapt to your own setup. | [omarchy/README.md](omarchy/README.md) |
+
+```text
+5  Desktop glue   Omarchy installer, Hyprland rule, menu entry   (omarchy/)   per desktop
+4  GUI            PyWebView app                       (app/)                  optional
+3  Services       systemd user units: restore, resume, keep-alive (packaging/) optional
+2  Device access  udev rule                           (packaging/)            ESSENTIAL
+1  Daemon CLI     Rust, talks HID, keeps saved state  (daemon/)               ESSENTIAL
+```
+
+Omarchy status: the components the installer sets up all run on the author's machine. The
+installer itself has been dry-run and its file-editing steps tested in an isolated home
+directory, but not yet run start to finish on a fresh Omarchy install. An Omarchy **bar
+widget / panel plugin** for the lighting controls is planned but not built yet; the daemon
+commands it would call already exist.
+
 ## Stack
 
 ```text
@@ -59,6 +83,9 @@ broadcast flag that reaches all 102 keyboard indices. See
 [docs/PROTOCOL_NOTES.md](docs/PROTOCOL_NOTES.md) for the discovery.
 
 ## Development
+
+On Omarchy you can skip the manual steps below and run [`omarchy/install.sh`](omarchy/README.md).
+For another distro see [docs/PORTABILITY.md](docs/PORTABILITY.md).
 
 ### Prerequisites
 
