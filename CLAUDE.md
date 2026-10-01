@@ -41,6 +41,18 @@ while keep-alive is `off` switches it to `active`. The GUI only previews (same c
 `$XDG_RUNTIME_DIR/ph18-lighting-hid.lock`; keyboard sweeps take it exclusively. `animation-frame --mode M --t T`
 prints the 36 values (used for JS/Rust parity checks).
 
+## Lid closed
+
+The keep-alive service also watches `/proc/acpi/button/lid/*/state`. Config keys in `keepalive.conf`:
+`lid_keys_off` (default true: no keep-alive/animation writes with the lid closed, so the keyboard + WASD
+sleep within the firmware's 30 s), `lid_logo` (`keep|off|timer`, default timer) and `lid_logo_minutes`
+(default 10): the cover logo is set to brightness 0 and restored (last brightness saved in
+`~/.cache/ph18-lighting/cover-brightness`) when the lid opens. CLI: `set-keepalive --lid-keys-off --lid-logo
+--lid-logo-minutes`. Only matters when the machine stays awake with the lid shut (external monitor);
+otherwise logind suspends it. The Infinity Mirror and Base Logo cannot be controlled yet (issue #1/#14
+research), so they are not covered. Batch key commands: `set-keyboard-keys --keys a,b --color r,g,b`,
+`clear-keyboard-keys --keys a,b`.
+
 ## Keyboard layout (GUI)
 
 `app/src/ph18_72_lighting_ui/ui/layout.js` is the single source for the Keyboard page: every key's

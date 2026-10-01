@@ -77,6 +77,20 @@ enum Command {
         #[arg(long)]
         key: String,
     },
+    /// Add or update per-key overrides for many keys in one go (one state save, no per-key process).
+    SetKeyboardKeys {
+        /// Comma-separated key names, e.g. q,w,e
+        #[arg(long, value_delimiter = ',', required = true)]
+        keys: Vec<String>,
+        /// R,G,B (0-255 each)
+        #[arg(long)]
+        color: String,
+    },
+    /// Remove the per-key overrides of many keys in one go.
+    ClearKeyboardKeys {
+        #[arg(long, value_delimiter = ',', required = true)]
+        keys: Vec<String>,
+    },
     /// Clear all per-key overrides; keep the current baseline.
     ResetKeyboard,
     /// Re-emit the persisted state to hardware without changing it.
@@ -106,6 +120,15 @@ enum Command {
         /// Only keep the lights on while on AC power (true/false).
         #[arg(long)]
         ac_only: Option<bool>,
+        /// Let the keyboard and WASD sleep while the lid is closed (true/false).
+        #[arg(long)]
+        lid_keys_off: Option<bool>,
+        /// Cover logo with the lid closed: keep it lit, turn it off, or turn it off after --lid-logo-minutes.
+        #[arg(long, value_parser = ["keep", "off", "timer"])]
+        lid_logo: Option<String>,
+        /// Minutes with the lid closed before the logo turns off (timer), 1-1440.
+        #[arg(long)]
+        lid_logo_minutes: Option<u32>,
     },
     /// Print the keep-alive settings.
     GetKeepalive,
@@ -242,13 +265,17 @@ fn main() {
             blue,
         } => set_keyboard_key(&key, (red, green, blue)),
         Command::ClearKeyboardKey { key } => clear_keyboard_key(&key),
+        Command::SetKeyboardKeys { keys, color } => parse_rgb_csv(&color).and_then(|c| set_keyboard_keys(&keys, Some(c))),
+        Command::ClearKeyboardKeys { keys } => set_keyboard_keys(&keys, None),
         Command::ResetKeyboard => reset_keyboard(),
         Command::RepaintKeyboard => repaint_keyboard_cmd(),
         Command::ProbeKeyboardWord { word } => probe_keyboard_word(&word),
         Command::GetKeyboardState => get_keyboard_state(),
         Command::KeyboardKeyIndices { keys } => keyboard_key_indices(&keys),
         Command::IdleProbe { idle_after, run_for } => idle_probe(idle_after, run_for),
-        Command::SetKeepalive { mode, minutes, ac_only } => set_keepalive(mode, minutes, ac_only),
+        Command::SetKeepalive { mode, minutes, ac_only, lid_keys_off, lid_logo, lid_logo_minutes } => {
+            set_keepalive(mode, minutes, ac_only, lid_keys_off, lid_logo, lid_logo_minutes)
+        }
         Command::GetKeepalive => print_keepalive("get-keepalive", &keepalive::Config::load()),
         Command::SetAnimation { mode, speed } => set_animation(mode, speed),
         Command::GetAnimation => print_animation("get-animation", &animation::Config::load()),
@@ -588,6 +615,45 @@ fn set_keyboard_key(key: &str, color: (u8, u8, u8)) -> io::Result<()> {
     Ok(())
 }
 
+/// Set (`Some(color)`) or clear (`None`) several keys with one state load, one save and one pass over
+/// the fast path. Every name is validated before anything is written.
+fn set_keyboard_keys(keys: &[String], color: Option<(u8, u8, u8)>) -> io::Result<()> {
+    let mut indices = Vec::with_capacity(keys.len());
+    for key in keys {
+        let index = keyboard_key_index(key).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, format!("unknown keyboard key {key}"))
+        })?;
+        if !indices.contains(&index) {
+            indices.push(index);
+        }
+    }
+    let mut state = load_keyboard_state();
+    let vendor = find_vendor_keyboard_node()?;
+    for &index in &indices {
+        let paint = match color {
+            Some(c) => {
+                state.overrides.insert(index, c);
+                c
+            }
+            None => {
+                state.overrides.remove(&index);
+                state.baseline_rgb
+            }
+        };
+        paint_index_via_report84(&vendor, index, paint)?;
+    }
+    save_keyboard_state(&state)?;
+
+    println!("action={}", if color.is_some() { "set-keyboard-keys" } else { "clear-keyboard-keys" });
+    println!("keys={}", indices.len());
+    if let Some(c) = color {
+        println!("rgb={},{},{}", c.0, c.1, c.2);
+    }
+    println!("overrides={}", state.overrides.len());
+    println!("result=sent");
+    Ok(())
+}
+
 fn clear_keyboard_key(key: &str) -> io::Result<()> {
     let index = keyboard_key_index(key).ok_or_else(|| {
         io::Error::new(
@@ -769,7 +835,14 @@ fn animation_frame(mode: &str, t: f64) -> io::Result<()> {
     Ok(())
 }
 
-fn set_keepalive(mode: Option<String>, minutes: Option<u32>, ac_only: Option<bool>) -> io::Result<()> {
+fn set_keepalive(
+    mode: Option<String>,
+    minutes: Option<u32>,
+    ac_only: Option<bool>,
+    lid_keys_off: Option<bool>,
+    lid_logo: Option<String>,
+    lid_logo_minutes: Option<u32>,
+) -> io::Result<()> {
     let mut cfg = keepalive::Config::load();
     if let Some(m) = mode {
         cfg.mode = keepalive::Mode::parse(&m)
@@ -784,6 +857,19 @@ fn set_keepalive(mode: Option<String>, minutes: Option<u32>, ac_only: Option<boo
     if let Some(a) = ac_only {
         cfg.ac_only = a;
     }
+    if let Some(v) = lid_keys_off {
+        cfg.lid_keys_off = v;
+    }
+    if let Some(l) = lid_logo {
+        cfg.lid_logo = keepalive::LidLogo::parse(&l)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "lid-logo must be keep, off or timer"))?;
+    }
+    if let Some(v) = lid_logo_minutes {
+        if !(1..=1440).contains(&v) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "lid-logo-minutes must be between 1 and 1440"));
+        }
+        cfg.lid_logo_minutes = v;
+    }
     cfg.save()?;
     print_keepalive("set-keepalive", &cfg)
 }
@@ -793,6 +879,10 @@ fn print_keepalive(action: &str, cfg: &keepalive::Config) -> io::Result<()> {
     println!("mode={}", cfg.mode.as_str());
     println!("minutes={}", cfg.minutes);
     println!("ac_only={}", cfg.ac_only);
+    println!("lid_keys_off={}", cfg.lid_keys_off);
+    println!("lid_logo={}", cfg.lid_logo.as_str());
+    println!("lid_logo_minutes={}", cfg.lid_logo_minutes);
+    println!("lid_closed={}", keepalive::lid_closed());
     println!("screensaver_seconds={}", keepalive::omarchy_screensaver_secs());
     match cfg.idle_threshold_secs() {
         Some(secs) => println!("idle_threshold_seconds={secs}"),
@@ -1075,6 +1165,7 @@ fn set_cover_logo(segment: Option<&str>, color: (u8, u8, u8), force_brightness: 
     println!("force_brightness={}", if force_brightness { "true" } else { "false" });
 
     if force_brightness {
+        save_cover_level(100);
         let payload = darfon_brightness_packet(100);
         println!("brightness_packet={}", hex_string(&payload));
         results.extend(attempt_darfon_transports(&node, &payload));
@@ -1105,7 +1196,37 @@ fn set_cover_logo(segment: Option<&str>, color: (u8, u8, u8), force_brightness: 
     Ok(())
 }
 
+fn cover_level_path() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/ph18-lighting/cover-brightness"))
+}
+
+/// The brightness the user last set (what to restore after the lid-closed blackout). Default 100.
+pub fn load_cover_level() -> u8 {
+    cover_level_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|t| t.trim().parse::<u8>().ok())
+        .map(|v| v.min(100))
+        .unwrap_or(100)
+}
+
+fn save_cover_level(level: u8) {
+    if let Some(p) = cover_level_path() {
+        if let Some(dir) = p.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let _ = fs::write(p, format!("{}\n", level.min(100)));
+    }
+}
+
+/// Set the cover-logo brightness without printing or remembering it (used by the lid handling).
+pub fn cover_logo_level_quiet(level: u8) -> io::Result<()> {
+    let node = find_darfon_node()?;
+    attempt_darfon_transports(&node, &darfon_brightness_packet(level));
+    Ok(())
+}
+
 fn set_cover_logo_brightness(level: u8) -> io::Result<()> {
+    save_cover_level(level);
     let node = find_darfon_node()?;
     let payload = darfon_brightness_packet(level);
 

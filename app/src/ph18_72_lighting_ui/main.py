@@ -133,15 +133,16 @@ class Api:
         """Keep-alive settings plus whether its background service is running."""
         if self._backend == "mock":
             return {"mode": "active", "minutes": 5, "ac_only": True,
+                    "lid_keys_off": True, "lid_logo": "timer", "lid_logo_minutes": 10,
                     "screensaver_seconds": 150, "service_active": True}
         cfg: dict = {}
         for line in self._daemon_lines(["get-keepalive"]):
             key, _, value = line.partition("=")
-            if key in ("mode",):
+            if key in ("mode", "lid_logo"):
                 cfg[key] = value
-            elif key in ("minutes", "screensaver_seconds"):
+            elif key in ("minutes", "screensaver_seconds", "lid_logo_minutes"):
                 cfg[key] = int(value) if value.isdigit() else 0
-            elif key == "ac_only":
+            elif key in ("ac_only", "lid_keys_off"):
                 cfg[key] = value == "true"
         if "mode" not in cfg:
             return {}

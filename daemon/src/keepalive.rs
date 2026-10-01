@@ -13,6 +13,10 @@
 //!   always   lights never sleep
 //!   timeout  lights stay on until you have been idle for `minutes`
 //! Optionally only while on AC power.
+//!
+//! Lid: with the lid closed the keyboard and WASD are left to sleep (no keep-alive, no animation)
+//! and, per the `lid_logo` setting, the cover logo is turned off (`off`) or after
+//! `lid_logo_minutes` (`timer`). Opening the lid brings both back.
 
 use std::fs;
 use std::io;
@@ -59,16 +63,54 @@ impl Mode {
     }
 }
 
+/// What the cover logo does while the lid is closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LidLogo {
+    Keep,
+    Off,
+    Timer,
+}
+
+impl LidLogo {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LidLogo::Keep => "keep",
+            LidLogo::Off => "off",
+            LidLogo::Timer => "timer",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<LidLogo> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "keep" => Some(LidLogo::Keep),
+            "off" => Some(LidLogo::Off),
+            "timer" => Some(LidLogo::Timer),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Config {
     pub mode: Mode,
     pub minutes: u32,
     pub ac_only: bool,
+    /// Let the keyboard and WASD sleep while the lid is closed.
+    pub lid_keys_off: bool,
+    pub lid_logo: LidLogo,
+    pub lid_logo_minutes: u32,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { mode: Mode::Off, minutes: 5, ac_only: true }
+        Config {
+            mode: Mode::Off,
+            minutes: 5,
+            ac_only: true,
+            lid_keys_off: true,
+            lid_logo: LidLogo::Timer,
+            lid_logo_minutes: 10,
+        }
     }
 }
 
@@ -97,6 +139,21 @@ impl Config {
                         cfg.ac_only = v;
                     }
                 }
+                "lid_keys_off" => {
+                    if let Some(v) = parse_bool(value) {
+                        cfg.lid_keys_off = v;
+                    }
+                }
+                "lid_logo" => {
+                    if let Some(v) = LidLogo::parse(value) {
+                        cfg.lid_logo = v;
+                    }
+                }
+                "lid_logo_minutes" => {
+                    if let Ok(v) = value.trim().parse::<u32>() {
+                        cfg.lid_logo_minutes = v.clamp(1, 1440);
+                    }
+                }
                 _ => {}
             }
         }
@@ -105,10 +162,13 @@ impl Config {
 
     pub fn serialize(&self) -> String {
         format!(
-            "# PH18-72 lighting keep-alive (edited by `ph18-lighting-daemon set-keepalive`)\nmode={}\nminutes={}\nac_only={}\n",
+            "# PH18-72 lighting keep-alive (edited by `ph18-lighting-daemon set-keepalive`)\nmode={}\nminutes={}\nac_only={}\nlid_keys_off={}\nlid_logo={}\nlid_logo_minutes={}\n",
             self.mode.as_str(),
             self.minutes,
-            self.ac_only
+            self.ac_only,
+            self.lid_keys_off,
+            self.lid_logo.as_str(),
+            self.lid_logo_minutes
         )
     }
 
@@ -228,16 +288,29 @@ fn on_ac_power() -> bool {
     !saw_mains
 }
 
+/// Is the laptop lid closed? (ACPI button state; an unreadable or missing file counts as open.)
+pub fn lid_closed() -> bool {
+    let Ok(entries) = fs::read_dir("/proc/acpi/button/lid") else { return false };
+    entries
+        .flatten()
+        .filter_map(|e| fs::read_to_string(e.path().join("state")).ok())
+        .any(|s| s.contains("closed"))
+}
+
 pub struct Inputs {
     pub idle: bool,
     pub on_ac: bool,
+    pub lid_closed: bool,
     pub secs_since_magkey_write: u64,
 }
 
 /// Do the current settings want the lights on right now? (The keep-alive rewrite and the
 /// animation both follow this.)
-pub fn lights_should_be_on(cfg: &Config, idle: bool, on_ac: bool) -> bool {
+pub fn lights_should_be_on(cfg: &Config, idle: bool, on_ac: bool, lid_closed: bool) -> bool {
     if cfg.mode == Mode::Off {
+        return false;
+    }
+    if lid_closed && cfg.lid_keys_off {
         return false;
     }
     if cfg.ac_only && !on_ac {
@@ -256,7 +329,7 @@ pub fn should_write(cfg: &Config, now: &Inputs) -> bool {
     if now.secs_since_magkey_write < RECENT_WRITE_SECS {
         return false;
     }
-    lights_should_be_on(cfg, now.idle, now.on_ac)
+    lights_should_be_on(cfg, now.idle, now.on_ac, now.lid_closed)
 }
 
 // ── A lock so HID writers never interleave ────────────────────────────────────────────
@@ -371,6 +444,7 @@ pub fn run() -> io::Result<()> {
     let mut was_animating = false;
     let mut last_touch = std::time::Instant::now();
     let mut link_error_logged = false;
+    let mut lid = LidState::default();
 
     loop {
         let cfg = Config::load();
@@ -400,12 +474,15 @@ pub fn run() -> io::Result<()> {
         let inputs = Inputs {
             idle: watcher.as_ref().map(|(w, _)| w.is_idle()).unwrap_or(false),
             on_ac: on_ac_power(),
+            lid_closed: lid_closed(),
             secs_since_magkey_write: secs_since_magkey_write(),
         };
+        lid_step(&cfg, inputs.lid_closed, &mut lid, &mut link);
+
         // ── An animation is selected: play it while the keep-alive rules want the lights on ──
         let anim = animation::Config::load();
         if let Some(mode) = anim.mode {
-            let on = lights_should_be_on(&cfg, inputs.idle, inputs.on_ac);
+            let on = lights_should_be_on(&cfg, inputs.idle, inputs.on_ac, inputs.lid_closed);
             let state = format!(
                 "animation={} on={} keepalive={} idle={} ac={}",
                 mode.as_str(), on, cfg.mode.as_str(), inputs.idle, inputs.on_ac
@@ -472,6 +549,7 @@ pub fn run() -> io::Result<()> {
         // Sleep until the next tick, but wake early if the user becomes active
         // again (so sleeping lights come back right away) or the settings change.
         let anim_stamp = animation_mtime();
+        let lid_stamp = lid_closed();
         let mut waited = 0;
         while waited < TICK_SECS {
             if let Some((_, rx)) = watcher.as_ref() {
@@ -484,8 +562,64 @@ pub fn run() -> io::Result<()> {
                 std::thread::sleep(Duration::from_secs(1));
             }
             waited += 1;
-            if config_mtime() != cfg_stamp || animation_mtime() != anim_stamp {
+            if config_mtime() != cfg_stamp || animation_mtime() != anim_stamp || lid_closed() != lid_stamp {
                 break;
+            }
+        }
+    }
+}
+
+/// Lid bookkeeping for the loop.
+#[derive(Default)]
+struct LidState {
+    closed_since: Option<std::time::Instant>,
+    logo_off: bool,
+}
+
+/// Should the cover logo be dark now? Pure, for testing.
+pub fn logo_should_be_off(cfg: &Config, lid_closed: bool, closed_for: Duration) -> bool {
+    if !lid_closed {
+        return false;
+    }
+    match cfg.lid_logo {
+        LidLogo::Keep => false,
+        LidLogo::Off => true,
+        LidLogo::Timer => closed_for >= Duration::from_secs(u64::from(cfg.lid_logo_minutes) * 60),
+    }
+}
+
+/// React to the lid: dim the cover logo per the settings, and wake the keyboard lights when it opens.
+fn lid_step(cfg: &Config, closed: bool, lid: &mut LidState, link: &mut AnimLink) {
+    let opened = !closed && lid.closed_since.is_some();
+    if closed {
+        lid.closed_since.get_or_insert_with(std::time::Instant::now);
+    } else {
+        lid.closed_since = None;
+    }
+    let closed_for = lid.closed_since.map(|t| t.elapsed()).unwrap_or_default();
+    let want_off = logo_should_be_off(cfg, closed, closed_for);
+    if want_off && !lid.logo_off {
+        println!("keepalive: lid closed, turning the cover logo off");
+        match crate::cover_logo_level_quiet(0) {
+            Ok(()) => lid.logo_off = true,
+            Err(e) => eprintln!("keepalive: could not turn the cover logo off: {e}"),
+        }
+    } else if !want_off && lid.logo_off {
+        let level = crate::load_cover_level();
+        println!("keepalive: restoring the cover logo (brightness {level})");
+        match crate::cover_logo_level_quiet(level) {
+            Ok(()) => lid.logo_off = false,
+            Err(e) => eprintln!("keepalive: could not restore the cover logo: {e}"),
+        }
+    }
+    if opened {
+        println!("keepalive: lid opened");
+        link.node = None;
+        // Wake the keyboard + WASD at once rather than at the next tick.
+        if lights_should_be_on(cfg, false, on_ac_power(), false) && animation::Config::load().mode.is_none() {
+            match send_saved_frame() {
+                Ok(()) => touch_magkey_write(),
+                Err(e) => eprintln!("keepalive: could not wake the lights: {e}"),
             }
         }
     }
@@ -501,20 +635,44 @@ mod tests {
     use super::*;
 
     fn inputs(idle: bool, on_ac: bool, since: u64) -> Inputs {
-        Inputs { idle, on_ac, secs_since_magkey_write: since }
+        Inputs { idle, on_ac, lid_closed: false, secs_since_magkey_write: since }
     }
 
     fn cfg(mode: Mode, ac_only: bool) -> Config {
-        Config { mode, minutes: 5, ac_only }
+        Config { mode, minutes: 5, ac_only, ..Config::default() }
     }
 
     #[test]
     fn lights_policy_ignores_how_recently_we_wrote() {
         // Used by the animation: it must not be gated by the "recent write" rule.
-        assert!(lights_should_be_on(&cfg(Mode::Always, false), false, true));
-        assert!(!lights_should_be_on(&cfg(Mode::Off, false), false, true));
-        assert!(!lights_should_be_on(&cfg(Mode::Active, false), true, true));
-        assert!(!lights_should_be_on(&cfg(Mode::Always, true), false, false));
+        assert!(lights_should_be_on(&cfg(Mode::Always, false), false, true, false));
+        assert!(!lights_should_be_on(&cfg(Mode::Off, false), false, true, false));
+        assert!(!lights_should_be_on(&cfg(Mode::Active, false), true, true, false));
+        assert!(!lights_should_be_on(&cfg(Mode::Always, true), false, false, false));
+    }
+
+    #[test]
+    fn closed_lid_stops_the_keys_unless_disabled() {
+        let mut c = cfg(Mode::Always, false);
+        assert!(!lights_should_be_on(&c, false, true, true));
+        assert!(lights_should_be_on(&c, false, true, false));
+        c.lid_keys_off = false;
+        assert!(lights_should_be_on(&c, false, true, true));
+        let closed = Inputs { idle: false, on_ac: true, lid_closed: true, secs_since_magkey_write: 999 };
+        assert!(!should_write(&cfg(Mode::Always, false), &closed));
+    }
+
+    #[test]
+    fn logo_follows_the_lid_settings() {
+        let mut c = Config { lid_logo: LidLogo::Off, ..Config::default() };
+        assert!(logo_should_be_off(&c, true, Duration::ZERO));
+        assert!(!logo_should_be_off(&c, false, Duration::from_secs(9999)));
+        c.lid_logo = LidLogo::Keep;
+        assert!(!logo_should_be_off(&c, true, Duration::from_secs(9999)));
+        c.lid_logo = LidLogo::Timer;
+        c.lid_logo_minutes = 2;
+        assert!(!logo_should_be_off(&c, true, Duration::from_secs(119)));
+        assert!(logo_should_be_off(&c, true, Duration::from_secs(120)));
     }
 
     #[test]
@@ -550,7 +708,7 @@ mod tests {
 
     #[test]
     fn config_round_trips() {
-        let c = Config { mode: Mode::Timeout, minutes: 12, ac_only: false };
+        let c = Config { mode: Mode::Timeout, minutes: 12, ac_only: false, lid_keys_off: false, lid_logo: LidLogo::Off, lid_logo_minutes: 3 };
         assert_eq!(Config::parse(&c.serialize()), c);
         assert_eq!(Config::parse(""), Config::default());
     }
@@ -569,7 +727,7 @@ mod tests {
     fn idle_thresholds() {
         assert_eq!(cfg(Mode::Off, true).idle_threshold_secs(), None);
         assert_eq!(cfg(Mode::Always, true).idle_threshold_secs(), None);
-        assert_eq!(Config { mode: Mode::Timeout, minutes: 7, ac_only: true }.idle_threshold_secs(), Some(420));
+        assert_eq!(Config { mode: Mode::Timeout, minutes: 7, ac_only: true, ..Config::default() }.idle_threshold_secs(), Some(420));
         assert!(cfg(Mode::Active, true).idle_threshold_secs().is_some());
     }
 

@@ -109,6 +109,20 @@
             <button class="btn-small" id="ka-minutes-set">Set</button>
           </div>
           <label class="ka-check"><input type="checkbox" id="ka-ac-only" checked> Only on AC power</label>
+          <label class="ka-check" title="With the lid closed the keyboard and WASD lights are left to go to sleep"><input type="checkbox" id="ka-lid-keys" checked> Keys off when the lid is closed</label>
+          <div class="ka-minutes">
+            <label for="ka-lid-logo">Cover logo, lid closed</label>
+            <select class="select-anim" id="ka-lid-logo">
+              <option value="keep">Stay on</option>
+              <option value="off">Turn off</option>
+              <option value="timer">Off after…</option>
+            </select>
+          </div>
+          <div class="ka-minutes" id="ka-lid-minutes-row" hidden>
+            <label for="ka-lid-minutes">Minutes</label>
+            <input type="number" id="ka-lid-minutes" min="1" max="1440" value="10">
+            <button class="btn-small" id="ka-lid-minutes-set">Set</button>
+          </div>
           <div class="sidebar-note" id="ka-note">—</div>
         </div>
       </div>

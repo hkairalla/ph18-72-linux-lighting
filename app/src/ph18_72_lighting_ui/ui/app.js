@@ -11,7 +11,7 @@ const api = (() => {
     run_daemon:        (args) => Promise.resolve({ ok: true, title: args[0], output: `mock: ${args.join(' ')}` }),
     get_animation: () => Promise.resolve({ mode: 'none', speed: 1, epoch_ms: 0, phase0: 0, keepalive_mode: 'active', service_active: true }),
     get_theme: () => Promise.resolve({}),
-    get_keepalive: () => Promise.resolve({ mode: 'active', minutes: 5, ac_only: true, screensaver_seconds: 150, service_active: true }),
+    get_keepalive: () => Promise.resolve({ mode: 'active', minutes: 5, ac_only: true, lid_keys_off: true, lid_logo: 'timer', lid_logo_minutes: 10, screensaver_seconds: 150, service_active: true }),
     get_keyboard_view: (names) => Promise.resolve({
       baseline: [0, 0, 255],
       keys: Object.fromEntries(names.map(n => [n, n === 'q' ? [255, 60, 60] : n === 'e' ? [60, 255, 90] : [0, 0, 255]])),
@@ -140,7 +140,7 @@ function pushHistory(record) {
 /* ── Daemon commands ─────────────────────────────────────────────────*/
 // Commands that change what the main keyboard is showing.
 const KEYBOARD_CMDS = new Set([
-  'set-keyboard-key', 'clear-keyboard-key', 'reset-keyboard', 'set-keyboard-baseline',
+  'set-keyboard-key', 'clear-keyboard-key', 'set-keyboard-keys', 'clear-keyboard-keys', 'reset-keyboard', 'set-keyboard-baseline',
   'set-main-keyboard-blue', 'set-main-keyboard-red', 'set-main-keyboard-green',
   'repaint-keyboard', 'restore-known-good',
 ]);
@@ -257,6 +257,12 @@ async function refreshKeepalive() {
   const minutes = document.getElementById('ka-minutes');
   if (document.activeElement !== minutes) minutes.value = cfg.minutes;
   document.getElementById('ka-ac-only').checked = !!cfg.ac_only;
+  document.getElementById('ka-lid-keys').checked = cfg.lid_keys_off !== false;
+  const lidLogo = document.getElementById('ka-lid-logo');
+  if (document.activeElement !== lidLogo) lidLogo.value = cfg.lid_logo || 'timer';
+  document.getElementById('ka-lid-minutes-row').hidden = (cfg.lid_logo || 'timer') !== 'timer';
+  const lidMin = document.getElementById('ka-lid-minutes');
+  if (document.activeElement !== lidMin) lidMin.value = cfg.lid_logo_minutes || 10;
   const note = document.getElementById('ka-note');
   const needsService = cfg.mode !== 'off' && cfg.service_active === false;
   note.textContent = kaDescribe(cfg) + (needsService
@@ -279,6 +285,19 @@ function initKeepalive() {
   });
   document.getElementById('ka-ac-only').addEventListener('change', async ev => {
     await runDaemon(['set-keepalive', '--ac-only', ev.target.checked ? 'true' : 'false']);
+    refreshKeepalive();
+  });
+  document.getElementById('ka-lid-keys').addEventListener('change', async ev => {
+    await runDaemon(['set-keepalive', '--lid-keys-off', ev.target.checked ? 'true' : 'false']);
+    refreshKeepalive();
+  });
+  document.getElementById('ka-lid-logo').addEventListener('change', async ev => {
+    await runDaemon(['set-keepalive', '--lid-logo', ev.target.value]);
+    refreshKeepalive();
+  });
+  document.getElementById('ka-lid-minutes-set').addEventListener('click', async () => {
+    const n = Math.max(1, Math.min(1440, parseInt(document.getElementById('ka-lid-minutes').value, 10) || 10));
+    await runDaemon(['set-keepalive', '--lid-logo-minutes', n]);
     refreshKeepalive();
   });
 }
@@ -745,10 +764,8 @@ function _initKeyboardPanelBody() {
       return;
     }
     const [r,g,b] = getKbRgb();
-    state.kbKeys.forEach(key => {
-      paintKey(key, [r, g, b]);
-      runDaemon(['set-keyboard-key', '--key', key, '--red', r, '--green', g, '--blue', b]);
-    });
+    state.kbKeys.forEach(key => paintKey(key, [r, g, b]));
+    runDaemon(['set-keyboard-keys', '--keys', state.kbKeys.join(','), '--color', `${r},${g},${b}`]);
   });
 
   wireBtn('btn-kb-clear', () => {
@@ -756,9 +773,7 @@ function _initKeyboardPanelBody() {
       setStatus('pick a key first', 'err');
       return;
     }
-    state.kbKeys.forEach(key => {
-      runDaemon(['clear-keyboard-key', '--key', key]);
-    });
+    runDaemon(['clear-keyboard-keys', '--keys', state.kbKeys.join(',')]);
   });
 
   wireBtn('btn-kb-reset', () => {
