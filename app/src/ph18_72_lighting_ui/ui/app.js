@@ -641,7 +641,13 @@ function _initKeyboardPanelBody() {
     if (!btn || btn.classList.contains('kb-magkey') || btn.classList.contains('kb-spacer')) {
       return;
     }
-    setSelection([btn.dataset.name]);
+    const name = btn.dataset.name;
+    if (ev.ctrlKey || ev.metaKey) {
+      // Ctrl/Cmd+click toggles one key in or out of the selection.
+      setSelection(state.kbKeys.includes(name) ? state.kbKeys.filter(n => n !== name) : [...state.kbKeys, name]);
+    } else {
+      setSelection([name]);
+    }
   });
 
   // Drag-box multi-selection. mousedown anywhere on the grid (including on
@@ -652,7 +658,7 @@ function _initKeyboardPanelBody() {
 
   grid.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return; // left click only
-    dragState = { startX: ev.clientX, startY: ev.clientY, boxEl: null };
+    dragState = { startX: ev.clientX, startY: ev.clientY, boxEl: null, additive: ev.ctrlKey || ev.metaKey || ev.shiftKey };
   });
 
   window.addEventListener('mousemove', (ev) => {
@@ -693,7 +699,7 @@ function _initKeyboardPanelBody() {
         if (intersects) hits.push(btn.dataset.name);
       });
       dragState.boxEl.remove();
-      setSelection(hits);
+      setSelection(dragState.additive ? [...state.kbKeys, ...hits] : hits);
     }
     dragState = null;
   });
