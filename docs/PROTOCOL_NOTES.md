@@ -137,15 +137,24 @@ one succeeds.
   (BGR order) and `08 01 01 05 <level> 01 00 ..` for brightness.
 - Sending `08 01 01 <op> ...` for ops 1-10 only behaved as brightness; no other effect opcodes were found.
 
-## Infinity Mirror (rear light bar)
+## Infinity Mirror (rear light bar): works via Acer WMI (2026-10)
 
-PredatorSense's "Infinity Mirror" tab is the rear bar with the HELIOS lettering: 7 zones, static/dynamic,
-brightness. The April Windows capture (`infinity_mirror_test.pcapng`) contains no USB writes at all, and the
-Base Logo capture is empty too. A read-only survey of the Acer gaming WMI getters (`GetGamingLED`,
-`GetGamingLEDBehavior`, `GetGamingLEDColor`, `GetGamingRgbKb`, `GetGamingSysInfo`, `GetGamingProfileSetting`,
-inputs 0-15 and packed zone/group forms) found only one LED group (the default color word `ae c7 50 08`),
-no per-zone state, and ignored the high input byte. So the mirror is not exposed through these getters.
-Next step: recapture in PredatorSense on Windows on every USBPcap interface, or find the path in the DSDT.
+PredatorSense's "Infinity Mirror" tab is the rear bar with the HELIOS lettering (7 zones in the app). It is **not
+USB**: the Windows captures contain no writes for it. It is driven through the Acer gaming WMI interface,
+`\_SB.PC00.WMID.WMBH` instance 0, **method 0x14 (SetGamingKBBacklight)** with a 16-byte buffer, layout taken from
+the community Venator driver (PH16-71) and confirmed on the PH18-72:
+
+`[mode, speed, brightness, 0x00, direction, R, G, B, 0x03, 0x02, 0 x6]`
+
+- Confirmed on hardware: `ff 05 64 00 01 ff 00 00 03 02 ...` (mode 0xff = static, red) turned the whole bar red.
+- **Off = static (0xff) with brightness 0**: `ff 00 00 00 01 ff 00 00 03 02 ...`. Mode `0x00` ("off" in Venator) did NOT turn
+  it off here, and a black static color at full brightness kept it off once it was already off.
+- Venator's mode ids: 0 off, 1 breathing, 2 neon, 3 rainbow, 4 wave, 5 ripple, 6 scanner, 7 strobe, 0xff static
+  (not yet tried here). Whole-bar only: no per-zone writes are known.
+- `GetGamingKBBacklight(1)` (method 0x15) does not reflect writes (it kept returning `00 00 05 64 00 01 00 ae c7`),
+  so the state cannot be read back.
+- Needs root (`/proc/acpi/call`, the `acpi_call` module). A normal-user path (helper + polkit/sudoers) is still to do.
+- The same earlier note about Acer WMI getters stands: the LED getters expose nothing per zone.
 
 ## Not Useful So Far
 
