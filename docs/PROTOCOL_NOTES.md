@@ -125,6 +125,28 @@ The daemon attempts four transport variants per write
 (`feature_prefixed`, `feature_raw`, `output_prefixed`, `output_raw`); at least
 one succeeds.
 
+### Cover logo: firmware animation and extra findings (2026-10)
+
+- Only segment ids 1-3 exist (ids 0 and 4-16 do nothing). They blend visually; the logo behind them has a
+  firmware rainbow (top to bottom) that is active after boot until a brightness or color packet freezes it.
+- Packet checksum: `tail = 0xff - (sum of the first 7 bytes) & 0xff`. The device does not seem to check it
+  (the daemon's color/brightness tails are not exact and still work).
+- Dynamic modes, from a Windows PredatorSense capture (`coverlogotest.pcapng`, frames 121-145), not yet in the
+  daemon: mode 3 = `14 03 00 00 00 00 02 e6` then `08 00 03 05 64 08 04 7f`; mode 5 =
+  `14 05 00 00 ae c7 02 6f` then `08 00 05 05 64 00 02 87`. Static = `14 01 <seg> BB GG RR 03 ..`
+  (BGR order) and `08 01 01 05 <level> 01 00 ..` for brightness.
+- Sending `08 01 01 <op> ...` for ops 1-10 only behaved as brightness; no other effect opcodes were found.
+
+## Infinity Mirror (rear light bar)
+
+PredatorSense's "Infinity Mirror" tab is the rear bar with the HELIOS lettering: 7 zones, static/dynamic,
+brightness. The April Windows capture (`infinity_mirror_test.pcapng`) contains no USB writes at all, and the
+Base Logo capture is empty too. A read-only survey of the Acer gaming WMI getters (`GetGamingLED`,
+`GetGamingLEDBehavior`, `GetGamingLEDColor`, `GetGamingRgbKb`, `GetGamingSysInfo`, `GetGamingProfileSetting`,
+inputs 0-15 and packed zone/group forms) found only one LED group (the default color word `ae c7 50 08`),
+no per-zone state, and ignored the high input byte. So the mirror is not exposed through these getters.
+Next step: recapture in PredatorSense on Windows on every USBPcap interface, or find the path in the DSDT.
+
 ## Not Useful So Far
 
 - `report 0x5A` group zones — HID accepts writes, no visible effect on the
