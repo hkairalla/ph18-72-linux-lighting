@@ -929,6 +929,8 @@ function initCoverPanel() {
     });
   });
 
+  document.getElementById('btn-cover-rainbow').addEventListener('click', () => runDaemon(['set-cover-logo-animation', '--mode', 'rainbow']));
+  document.getElementById('btn-cover-mode5').addEventListener('click', () => runDaemon(['set-cover-logo-animation', '--mode', 'mode5']));
   document.getElementById('btn-brightness-apply').addEventListener('click', () => {
     const level = document.getElementById('cover-brightness').value;
     runDaemon(['set-cover-logo-brightness', '--level', level]);

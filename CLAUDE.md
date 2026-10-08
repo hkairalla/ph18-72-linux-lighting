@@ -16,7 +16,7 @@ reverse-engineering scratchwork lives under git-ignored `testing/`.
 ## What works
 
 - MagKey RGB (whole / pattern / per-key / per-zone).
-- Cover Logo (whole + left/middle/right segments + brightness).
+- Cover Logo (whole + left/middle/right segments + brightness, plus the firmware's own rainbow animation via `set-cover-logo-animation`; Darfon packets carry a checksum `0xff - sum(first 7)`).
 - Main keyboard whole-board color: any 24-bit RGB baseline (named presets `off`/`blue`/`red`/`green` are aliases).
 - Per-key keyboard colors (with the state-aware repaint model below).
 - Infinity Mirror (rear light bar) as one zone: mode / color / brightness / speed, via Acer WMI (below).

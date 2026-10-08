@@ -248,6 +248,13 @@ enum Command {
         #[arg(long)]
         level: u8,
     },
+    /// Start one of the cover logo's own firmware animations (from a PredatorSense capture).
+    /// `rainbow` (mode 3) is confirmed on hardware; `mode5` was captured but not yet observed.
+    /// Any static color or brightness write stops it again.
+    SetCoverLogoAnimation {
+        #[arg(long, value_parser = ["rainbow", "mode5"])]
+        mode: String,
+    },
     /// Set the Infinity Mirror (rear light bar). Goes through the BIOS (Acer WMI), so it needs the
     /// root helper from the installer. Fields you leave out keep their last value.
     SetMirror {
@@ -365,6 +372,7 @@ fn main() {
             no_force_brightness,
         } => set_cover_logo(segment.as_deref(), (red, green, blue), !no_force_brightness),
         Command::SetCoverLogoBrightness { level } => set_cover_logo_brightness(level),
+        Command::SetCoverLogoAnimation { mode } => set_cover_logo_animation(&mode),
         Command::SetMirror { args } => set_zone(wmi::Zone::Mirror, args),
         Command::GetMirror => print_zone("get-mirror", &wmi::LightState::load(wmi::Zone::Mirror), None),
         Command::RepaintMirror => repaint_zone(wmi::Zone::Mirror),
@@ -1628,15 +1636,49 @@ fn darfon_segment_id(name: &str) -> io::Result<u8> {
     }
 }
 
+/// Darfon packets end in a checksum: 0xff minus the sum of the first seven bytes (derived from
+/// the captures; the controller does not seem to verify it, but the captured packets all obey it).
+fn darfon_packet(body: [u8; 7]) -> [u8; 8] {
+    let sum = body.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
+    let mut packet = [0u8; 8];
+    packet[..7].copy_from_slice(&body);
+    packet[7] = 0xffu8.wrapping_sub(sum);
+    packet
+}
+
 fn darfon_color_packet(segment: u8, red: u8, green: u8, blue: u8) -> [u8; 8] {
-    let tail = 0xe8u8.saturating_sub(segment);
-    [0x14, 0x01, segment, red, green, blue, 0x03, tail]
+    darfon_packet([0x14, 0x01, segment, red, green, blue, 0x03])
 }
 
 fn darfon_brightness_packet(level: u8) -> [u8; 8] {
-    let level = level.min(100);
-    let tail = (0xefi32 - (((level as i32) * 25) / 4)) as u8;
-    [0x08, 0x01, 0x01, 0x05, level, 0x01, 0x00, tail]
+    darfon_packet([0x08, 0x01, 0x01, 0x05, level.min(100), 0x01, 0x00])
+}
+
+/// The two firmware-animation packet pairs captured from PredatorSense ("dynamic" modes).
+fn darfon_animation_packets(mode: &str) -> Option<[[u8; 8]; 2]> {
+    match mode {
+        "rainbow" => Some([darfon_packet([0x14, 0x03, 0x00, 0x00, 0x00, 0x00, 0x02]), darfon_packet([0x08, 0x00, 0x03, 0x05, 0x64, 0x08, 0x04])]),
+        "mode5" => Some([darfon_packet([0x14, 0x05, 0x00, 0x00, 0xae, 0xc7, 0x02]), darfon_packet([0x08, 0x00, 0x05, 0x05, 0x64, 0x00, 0x02])]),
+        _ => None,
+    }
+}
+
+fn set_cover_logo_animation(mode: &str) -> io::Result<()> {
+    let packets = darfon_animation_packets(mode)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "mode must be rainbow or mode5"))?;
+    let node = find_darfon_node()?;
+    println!("action=set-cover-logo-animation");
+    println!("controller=0d62:ba51");
+    println!("mode={mode}");
+    println!("hidraw={}", node.display());
+    for payload in packets {
+        println!("packet={}", hex_string(&payload));
+        for (method, outcome) in attempt_darfon_transports(&node, &payload) {
+            println!("{method}={outcome}");
+        }
+    }
+    println!("result=sent");
+    Ok(())
 }
 
 fn attempt_darfon_transports(node: &Path, payload: &[u8]) -> Vec<(String, String)> {
@@ -1883,6 +1925,19 @@ fn hex_string(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn darfon_packets_match_the_captures() {
+        // coverlogotest.pcapng: blue segment 1, brightness 100 / 0, dynamic mode 3 and 5.
+        assert_eq!(hex_string(&darfon_color_packet(1, 0xff, 0, 0)), "140101ff000003e7");
+        assert_eq!(hex_string(&darfon_color_packet(3, 0, 0, 0xff)), "1401030000ff03e5");
+        assert_eq!(hex_string(&darfon_brightness_packet(100)), "080101056401008b");
+        assert_eq!(hex_string(&darfon_brightness_packet(0)), "08010105000100ef");
+        let [a, b] = darfon_animation_packets("rainbow").unwrap();
+        assert_eq!((hex_string(&a), hex_string(&b)), ("14030000000002e6".into(), "080003056408047f".into()));
+        let [a, b] = darfon_animation_packets("mode5").unwrap();
+        assert_eq!((hex_string(&a), hex_string(&b)), ("14050000aec7026f".into(), "0800050564000287".into()));
+    }
 
     /// Tests that point the daemon at a scratch HOME mutate a process-wide variable, and the test
     /// runner uses several threads: hold this while HOME is overridden so they cannot overlap.

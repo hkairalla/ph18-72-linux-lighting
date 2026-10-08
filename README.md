@@ -257,6 +257,7 @@ ph18-lighting-daemon set-animation --mode none                # stop; saved colo
 ph18-lighting-daemon set-mirror --mode static --color 255,0,0 --brightness 80   # Infinity Mirror (rear bar), needs the root helper
 ph18-lighting-daemon set-mirror --on false                    # mirror dark; --on true brings the look back
 ph18-lighting-daemon set-base-logo --color 0,174,199 --brightness 80   # Base Logo (static only)
+ph18-lighting-daemon set-cover-logo-animation --mode rainbow  # the cover logo's own firmware rainbow; any color/brightness write stops it
 
 # Light sleep timer (see "Keep the lights on")
 ph18-lighting-daemon set-keepalive --mode active
