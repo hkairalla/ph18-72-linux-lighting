@@ -199,6 +199,34 @@ class Api:
         keys = {name: overrides.get(index, baseline) for name, index in indices.items()}
         return {"baseline": baseline, "keys": keys, "magkeys": magkeys}
 
+    def get_mirror(self) -> dict:
+        return self._get_wmi_zone("get-mirror")
+
+    def get_base_logo(self) -> dict:
+        return self._get_wmi_zone("get-base-logo")
+
+    def _get_wmi_zone(self, command: str) -> dict:
+        """Last state the daemon sent to a BIOS-driven zone (Infinity Mirror / Base Logo; no
+        readback exists) plus whether the root helper is usable. {} if the daemon command failed."""
+        if self._backend == "mock":
+            return {"on": True, "mode": "static", "rgb": [0, 174, 199], "brightness": 100,
+                    "speed": 5, "direction": 1, "helper_ready": True}
+        cfg: dict = {}
+        for line in self._daemon_lines([command]):
+            key, _, value = line.partition("=")
+            try:
+                if key == "rgb":
+                    cfg[key] = [int(v) for v in value.split(",")]
+                elif key in ("brightness", "speed", "direction"):
+                    cfg[key] = int(value)
+                elif key in ("on", "helper_ready"):
+                    cfg[key] = value == "true"
+                elif key == "mode":
+                    cfg[key] = value
+            except ValueError:
+                pass
+        return cfg if "mode" in cfg else {}
+
     def get_animation(self) -> dict:
         """The MagKey animation the background service is running: {mode, speed, epoch_ms, phase0,
         keepalive_mode, service_active}. mode is "none" when nothing is animating. The GUI only

@@ -90,3 +90,19 @@ and unverified, so check them before relying on them.
 Everything under [`omarchy/`](../omarchy/README.md), and the `idle.screensaver` lookup above.
 Nothing in `daemon/`, `app/` or `packaging/` depends on Omarchy; they only assume Linux, and
 (for the keep-alive's `active`/`timeout` modes) a Wayland compositor.
+
+## Infinity Mirror (rear bar): root helper
+
+The bar is controlled through the BIOS (Acer WMI method `\_SB.PC00.WMID.WMBH` 0x14), reachable only via
+the `acpi_call` kernel module's root-only `/proc/acpi/call`. The daemon therefore runs a tiny root helper,
+`daemon/target/release/ph18-lighting-wmi`, through `sudo -n`. To set that up on any distro:
+
+```bash
+sudo install -Dm755 -o root -g root daemon/target/release/ph18-lighting-wmi /usr/local/libexec/ph18-lighting-wmi
+echo "$USER ALL=(root) NOPASSWD: /usr/local/libexec/ph18-lighting-wmi" | sudo tee /etc/sudoers.d/ph18-lighting && sudo chmod 0440 /etc/sudoers.d/ph18-lighting
+echo acpi_call | sudo tee /etc/modules-load.d/ph18-lighting.conf && sudo modprobe acpi_call
+```
+
+The helper accepts exactly one 16-byte lighting buffer and nothing else, so the NOPASSWD rule exposes no
+other capability. Install `acpi_call` from your distro (Arch: `acpi_call-dkms` on the AUR; Debian/Ubuntu:
+`acpi-call-dkms`).

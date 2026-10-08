@@ -44,6 +44,10 @@ repaint() {
   for attempt in 1 2 3 4 5; do
     if flock -w 120 "$LOCK" "$daemon" repaint-keyboard >/dev/null 2>&1; then
       log "repainted (attempt $attempt)"
+      # The Infinity Mirror lives in the BIOS and may reset too; re-send its saved look if the
+      # user ever set one (needs the root helper from the installer; silently skipped otherwise).
+      [[ -f "$HOME/.cache/ph18-lighting/mirror-state" ]] && "$daemon" repaint-mirror >/dev/null 2>&1 && log "mirror repainted"
+      [[ -f "$HOME/.cache/ph18-lighting/base-logo-state" ]] && "$daemon" repaint-base-logo >/dev/null 2>&1 && log "base logo repainted"
       return 0
     fi
     log "repaint failed (attempt $attempt), retrying"

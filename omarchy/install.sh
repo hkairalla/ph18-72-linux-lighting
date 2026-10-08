@@ -4,13 +4,14 @@
 #   omarchy/install.sh                 do everything below
 #   omarchy/install.sh --dry-run       print what would happen, change nothing
 #   omarchy/install.sh --uninstall     remove the services, menu entry and Hyprland rule
-#   --no-deps --no-ui --no-udev --no-services --no-desktop --no-hypr    skip a step
+#   --no-deps --no-ui --no-udev --no-wmi --no-services --no-desktop --no-hypr    skip a step
 #
 # Steps:
 #   1 deps      system packages (pacman)
 #   2 build     Rust daemon, release build
 #   3 ui        Python virtualenv + the GUI
 #   4 udev      hidraw access for your user         (needs sudo)
+#   4b wmi      root helper + sudoers rule for the Infinity Mirror (BIOS/WMI path)  (needs sudo)
 #   5 services  systemd user units: restore (login), resume (wake), keepalive (light timer)
 #   6 desktop   app-menu entry
 #   7 hypr      Hyprland window rule for the GUI
@@ -25,7 +26,7 @@ REPO_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 DEFAULT_REPO_IN_UNITS='%h/Projects/ph18-72-linux-lighting'   # what the packaged units assume
 
 DRY=0 UNINSTALL=0
-DO_DEPS=1 DO_UI=1 DO_UDEV=1 DO_SERVICES=1 DO_DESKTOP=1 DO_HYPR=1
+DO_DEPS=1 DO_UI=1 DO_UDEV=1 DO_WMI=1 DO_SERVICES=1 DO_DESKTOP=1 DO_HYPR=1
 for arg in "$@"; do
   case "$arg" in
     --dry-run)     DRY=1 ;;
@@ -33,6 +34,7 @@ for arg in "$@"; do
     --no-deps)     DO_DEPS=0 ;;
     --no-ui)       DO_UI=0 ;;
     --no-udev)     DO_UDEV=0 ;;
+    --no-wmi)      DO_WMI=0 ;;
     --no-services) DO_SERVICES=0 ;;
     --no-desktop)  DO_DESKTOP=0 ;;
     --no-hypr)     DO_HYPR=0 ;;
@@ -45,6 +47,8 @@ SERVICES=(restore resume keepalive)
 UNIT_DIR="$HOME/.config/systemd/user"
 DESKTOP_DIR="$HOME/.local/share/applications"
 HYPR_FILE="$HOME/.config/hypr/hyprland.lua"
+WMI_HELPER_DST=/usr/local/libexec/ph18-lighting-wmi
+SUDOERS_DST=/etc/sudoers.d/ph18-lighting
 MARK_BEGIN='-- >>> ph18-lighting (managed by omarchy/install.sh) >>>'
 MARK_END='-- <<< ph18-lighting <<<'
 
@@ -80,6 +84,7 @@ if (( UNINSTALL )); then
   fi
   note "Left in place: the udev rule, system packages, ~/.config/ph18-lighting, ~/.cache/ph18-lighting."
   note "Remove the udev rule with: sudo rm /etc/udev/rules.d/70-ph18-72-lighting.rules"
+  note "Remove the Infinity Mirror root helper with: sudo rm $WMI_HELPER_DST $SUDOERS_DST"
   exit 0
 fi
 
@@ -88,6 +93,7 @@ command -v pacman >/dev/null || { echo "This installer targets Arch/Omarchy (pac
 # 1 ---------------------------------------------------------------------------------
 if (( DO_DEPS )); then
   say "1/7 System packages"
+  # acpi_call-dkms (AUR) gives /proc/acpi/call, which the Infinity Mirror needs; it is optional.
   PKGS=(rust python python-gobject webkit2gtk-4.1 gtk3)
   missing=$(pacman -T "${PKGS[@]}" || true)
   if [[ -z "$missing" ]]; then note "all present: ${PKGS[*]}"
@@ -116,6 +122,34 @@ if (( DO_UDEV )); then
     run sudo install -Dm644 "$RULE_SRC" "$RULE_DST"
     run sudo udevadm control --reload-rules
     run sudo udevadm trigger --subsystem-match=hidraw --action=change
+  fi
+fi
+
+# 4b --------------------------------------------------------------------------------
+if (( DO_WMI )); then
+  say "4b/7 Infinity Mirror root helper (Acer WMI through acpi_call)"
+  HELPER_SRC="$REPO_ROOT/daemon/target/release/ph18-lighting-wmi"
+  if ! lsmod | grep -q '^acpi_call' && ! modinfo acpi_call >/dev/null 2>&1; then
+    note "acpi_call is not installed: the Infinity Mirror will stay unavailable until it is."
+    note "  yay -S acpi_call-dkms   (then run this installer again)"
+  fi
+  # The helper only accepts one 16-byte lighting buffer (see daemon/src/bin/ph18-lighting-wmi.rs), so
+  # letting your user run it as root without a password exposes nothing else. It must live in a
+  # root-owned place: sudoers trusting a file in your home would be root for anything that can edit it.
+  if cmp -s "$HELPER_SRC" "$WMI_HELPER_DST" 2>/dev/null; then note "helper already installed and up to date"
+  else run sudo install -Dm755 -o root -g root "$HELPER_SRC" "$WMI_HELPER_DST"; fi
+  SUDOERS_LINE="$USER ALL=(root) NOPASSWD: $WMI_HELPER_DST"
+  if [[ -f "$SUDOERS_DST" ]] && sudo grep -qxF -- "$SUDOERS_LINE" "$SUDOERS_DST" 2>/dev/null; then note "sudoers rule already present"
+  elif (( DRY )); then note "+ write $SUDOERS_DST: $SUDOERS_LINE"
+  else
+    printf '%s\n' "$SUDOERS_LINE" | sudo tee "$SUDOERS_DST" >/dev/null
+    sudo chmod 0440 "$SUDOERS_DST"
+    if ! sudo visudo -cf "$SUDOERS_DST" >/dev/null; then sudo rm -f "$SUDOERS_DST"; echo "sudoers rule failed validation and was removed" >&2; exit 1; fi
+    note "sudoers rule written"
+  fi
+  if command -v modprobe >/dev/null && modinfo acpi_call >/dev/null 2>&1; then
+    MODLOAD=/etc/modules-load.d/ph18-lighting.conf
+    [[ -f "$MODLOAD" ]] || { run sudo sh -c "echo acpi_call > $MODLOAD"; run sudo modprobe acpi_call; }
   fi
 fi
 

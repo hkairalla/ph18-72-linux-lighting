@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 mod animation;
 mod idle;
 mod keepalive;
+mod wmi;
 
 const TARGET_HID_ID: &str = "0003:000005AF:0000866A";
 const DARFON_HID_ID: &str = "0003:00000D62:0000BA51";
@@ -247,6 +248,57 @@ enum Command {
         #[arg(long)]
         level: u8,
     },
+    /// Set the Infinity Mirror (rear light bar). Goes through the BIOS (Acer WMI), so it needs the
+    /// root helper from the installer. Fields you leave out keep their last value.
+    SetMirror {
+        #[command(flatten)]
+        args: ZoneArgs,
+    },
+    /// Print the last Infinity Mirror state written (the BIOS cannot be read back) and whether
+    /// the root helper is usable.
+    GetMirror,
+    /// Re-send the saved Infinity Mirror state (login / resume).
+    RepaintMirror,
+    /// Set the Base Logo (BIOS, Acer WMI LED group 1): static color and brightness only. Fields
+    /// you leave out keep their last value.
+    SetBaseLogo {
+        /// R,G,B (0-255 each)
+        #[arg(long)]
+        color: Option<String>,
+        /// 0-100
+        #[arg(long)]
+        brightness: Option<u8>,
+        /// true = show the saved look, false = dark (the look is kept for the next `--on true`)
+        #[arg(long)]
+        on: Option<bool>,
+    },
+    /// Print the last Base Logo state written and whether the root helper is usable.
+    GetBaseLogo,
+    /// Re-send the saved Base Logo state (login / resume).
+    RepaintBaseLogo,
+}
+
+/// The fields of a BIOS-driven zone (Infinity Mirror, Base Logo).
+#[derive(clap::Args, Debug)]
+struct ZoneArgs {
+        /// static, breathing, neon, rainbow, wave, ripple, scanner, strobe
+        #[arg(long, value_parser = ["static", "breathing", "neon", "rainbow", "wave", "ripple", "scanner", "strobe"])]
+        mode: Option<String>,
+        /// R,G,B (0-255 each)
+        #[arg(long)]
+        color: Option<String>,
+        /// 0-100
+        #[arg(long)]
+        brightness: Option<u8>,
+        /// 1-9 (effect modes)
+        #[arg(long)]
+        speed: Option<u8>,
+        /// 1 or 2 (effect modes)
+        #[arg(long)]
+        direction: Option<u8>,
+        /// true = show the saved look, false = dark (the look is kept for the next `--on true`)
+        #[arg(long)]
+        on: Option<bool>,
 }
 
 fn main() {
@@ -313,6 +365,14 @@ fn main() {
             no_force_brightness,
         } => set_cover_logo(segment.as_deref(), (red, green, blue), !no_force_brightness),
         Command::SetCoverLogoBrightness { level } => set_cover_logo_brightness(level),
+        Command::SetMirror { args } => set_zone(wmi::Zone::Mirror, args),
+        Command::GetMirror => print_zone("get-mirror", &wmi::LightState::load(wmi::Zone::Mirror), None),
+        Command::RepaintMirror => repaint_zone(wmi::Zone::Mirror),
+        Command::SetBaseLogo { color, brightness, on } => {
+            set_zone(wmi::Zone::BaseLogo, ZoneArgs { mode: None, color, brightness, speed: None, direction: None, on })
+        }
+        Command::GetBaseLogo => print_zone("get-base-logo", &wmi::LightState::load(wmi::Zone::BaseLogo), None),
+        Command::RepaintBaseLogo => repaint_zone(wmi::Zone::BaseLogo),
     };
 
     if let Err(err) = result {
@@ -847,6 +907,15 @@ fn set_keepalive(
     if let Some(m) = mode {
         cfg.mode = keepalive::Mode::parse(&m)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "mode must be off, active, always or timeout"))?;
+        // Off means nothing keeps the lights awake, so a running animation stops (the service
+        // restores the static colors). Symmetric with set-animation switching Off -> Active.
+        if cfg.mode == keepalive::Mode::Off {
+            let anim = animation::Config::load();
+            if anim.mode.is_some() {
+                anim.updated(Some(None), None, animation::now_ms()).save()?;
+                println!("note=the WASD animation was stopped because keep-alive is off");
+            }
+        }
     }
     if let Some(v) = minutes {
         if !(1..=1440).contains(&v) {
@@ -1134,7 +1203,11 @@ fn apply_magkey_frame_raw(payload: &[u8; 64]) -> io::Result<(PathBuf, [u8; 64])>
 
 /// Send a MagKey frame and remember it, so later repaints can restore it.
 fn apply_magkey_frame(payload: &[u8; 64]) -> io::Result<(PathBuf, [u8; 64])> {
-    let result = apply_magkey_frame_raw(payload)?;
+    // Shared lock: a keyboard sweep (exclusive) must not be interleaved with this frame.
+    let result = {
+        let _hid = keepalive::hid_lock_shared()?;
+        apply_magkey_frame_raw(payload)?
+    };
     let mut state = load_keyboard_state();
     state.magkeys = Some(emitters_from_frame(payload));
     // A failure to save must not fail the (already applied) hardware write.
@@ -1221,8 +1294,13 @@ fn save_cover_level(level: u8) {
 /// Set the cover-logo brightness without printing or remembering it (used by the lid handling).
 pub fn cover_logo_level_quiet(level: u8) -> io::Result<()> {
     let node = find_darfon_node()?;
-    attempt_darfon_transports(&node, &darfon_brightness_packet(level));
-    Ok(())
+    let results = attempt_darfon_transports(&node, &darfon_brightness_packet(level));
+    if results.iter().any(|(_, outcome)| outcome == "ok") {
+        Ok(())
+    } else {
+        let why = results.iter().map(|(m, o)| format!("{m}: {o}")).collect::<Vec<_>>().join("; ");
+        Err(io::Error::new(io::ErrorKind::Other, format!("no transport accepted the write ({why})")))
+    }
 }
 
 fn set_cover_logo_brightness(level: u8) -> io::Result<()> {
@@ -1241,6 +1319,72 @@ fn set_cover_logo_brightness(level: u8) -> io::Result<()> {
         println!("{method}={outcome}");
     }
     println!("result=sent");
+    Ok(())
+}
+
+// ── Infinity Mirror / Base Logo (Acer WMI) ────────────────────────────────────────────
+
+fn set_zone(zone: wmi::Zone, args: ZoneArgs) -> io::Result<()> {
+    let ZoneArgs { mode, color, brightness, speed, direction, on } = args;
+    let mut s = wmi::LightState::load(zone);
+    if let Some(m) = mode {
+        s.mode = wmi::Mode::parse(&m).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "unknown mirror mode"))?;
+    }
+    if let Some(c) = color {
+        s.color = parse_rgb_csv(&c)?;
+    }
+    if let Some(b) = brightness {
+        if b > 100 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "brightness must be 0-100"));
+        }
+        s.brightness = b;
+        // Brightness 0 is how the bar is turned off; anything else turns it back on.
+        s.on = b > 0;
+    }
+    if let Some(v) = speed {
+        if !(1..=9).contains(&v) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "speed must be 1-9"));
+        }
+        s.speed = v;
+    }
+    if let Some(d) = direction {
+        if !(1..=2).contains(&d) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "direction must be 1 or 2"));
+        }
+        s.direction = d;
+    }
+    if let Some(o) = on {
+        s.on = o;
+        if o && s.brightness == 0 {
+            s.brightness = 100;
+        }
+    }
+    let (reply, via) = wmi::write(&s.call())?;
+    s.save()?;
+    print_zone(&format!("set-{}", zone.as_str()), &s, Some((&reply, via)))
+}
+
+fn repaint_zone(zone: wmi::Zone) -> io::Result<()> {
+    let s = wmi::LightState::load(zone);
+    let (reply, via) = wmi::write(&s.call())?;
+    print_zone(&format!("repaint-{}", zone.as_str()), &s, Some((&reply, via)))
+}
+
+fn print_zone(action: &str, s: &wmi::LightState, sent: Option<(&str, &str)>) -> io::Result<()> {
+    println!("action={action}");
+    println!("zone={}", s.zone.as_str());
+    println!("on={}", s.on);
+    println!("mode={}", s.mode.as_str());
+    println!("rgb={},{},{}", s.color.0, s.color.1, s.color.2);
+    println!("brightness={}", s.brightness);
+    println!("speed={}", s.speed);
+    println!("direction={}", s.direction);
+    println!("helper_ready={}", wmi::helper_ready());
+    if let Some((reply, via)) = sent {
+        println!("via={via}");
+        println!("acpi_reply={reply}");
+        println!("result=sent");
+    }
     Ok(())
 }
 

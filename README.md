@@ -51,11 +51,11 @@ protocol summary.
 | Main keyboard whole-board color | Confirmed for any 24-bit RGB | HID `05af:866a` ff02 commit33 (broadcast mode) |
 | Main keyboard per-key colors | Confirmed (anchored to a baseline) | HID `05af:866a` ff02 anchor + `report84` per-key |
 | Keyboard + WASD light sleep (30 s) | Worked around | MagKey frame write resets the firmware timer; see [Keep the lights on](#keep-the-lights-on-beat-the-30-s-sleep) |
-| Base Logo | Unknown | HID inconclusive; WMI/ACPI may help |
-| Infinity Mirror | Unknown | HID inconclusive; WMI/ACPI may help |
+| Infinity Mirror (rear bar) | Confirmed, one zone (mode / color / brightness / speed) | Acer WMI `SetGamingKBBacklight` via `acpi_call`, root helper `ph18-lighting-wmi` installed by the installer |
+| Base Logo | Confirmed, static color + brightness | Acer WMI `SetGamingLEDColor` via `acpi_call`, same root helper |
 
 The firmware's Acer WMI gaming interface (keyboard backlight, misc settings, fans,
-battery health) has been mapped read-only; the findings are in
+battery health) has been mapped; the Infinity Mirror is driven through it. The findings are in
 [docs/PROTOCOL_NOTES.md](docs/PROTOCOL_NOTES.md).
 
 See [docs/HARDWARE_STATUS.md](docs/HARDWARE_STATUS.md) for the full table.
@@ -254,6 +254,9 @@ ph18-lighting-daemon set-magkey-zones --key a --left 255,0,0 --top 0,255,0 --rig
 ph18-lighting-daemon set-magkey-emitters --colors 0,180,255,0,180,255,...   # all 12 zones (36 values), what the UI uses
 ph18-lighting-daemon set-animation --mode wheel --speed 1.5   # plays in the background service, survives closing the GUI
 ph18-lighting-daemon set-animation --mode none                # stop; saved colors return
+ph18-lighting-daemon set-mirror --mode static --color 255,0,0 --brightness 80   # Infinity Mirror (rear bar), needs the root helper
+ph18-lighting-daemon set-mirror --on false                    # mirror dark; --on true brings the look back
+ph18-lighting-daemon set-base-logo --color 0,174,199 --brightness 80   # Base Logo (static only)
 
 # Light sleep timer (see "Keep the lights on")
 ph18-lighting-daemon set-keepalive --mode active

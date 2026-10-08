@@ -25,6 +25,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, SystemTime};
 
 use crate::animation;
+use crate::wmi;
 use crate::idle::IdleWatcher;
 
 /// How often the saved frame is re-sent. Well inside the firmware's 30 s.
@@ -365,6 +366,16 @@ pub fn hid_lock_exclusive() -> io::Result<HidLock> {
     }
 }
 
+/// Take the shared lock, waiting for a running sweep to finish.
+pub fn hid_lock_shared() -> io::Result<HidLock> {
+    let f = open_hid_lock()?;
+    if flock(&f, libc::LOCK_SH) {
+        Ok(HidLock(f))
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 /// Take the shared lock if no sweep is running; `None` means "a sweep is in progress, skip".
 fn hid_lock_shared_try() -> Option<HidLock> {
     let f = open_hid_lock().ok()?;
@@ -378,6 +389,7 @@ fn config_mtime() -> Option<SystemTime> {
 /// Send the saved MagKey frame (all-off if none was ever saved).
 fn send_saved_frame() -> io::Result<()> {
     let frame = crate::load_keyboard_state().magkeys.unwrap_or([(0, 0, 0); 12]);
+    let _hid = hid_lock_shared()?; // never interleave with a keyboard sweep
     crate::apply_magkey_frame_raw(&crate::build_magkey_frame(&frame)).map(|_| ())
 }
 
@@ -480,8 +492,11 @@ pub fn run() -> io::Result<()> {
         lid_step(&cfg, inputs.lid_closed, &mut lid, &mut link);
 
         // ── An animation is selected: play it while the keep-alive rules want the lights on ──
+        // (With keep-alive off nothing may keep the lights awake, so an animation left in the
+        // config is treated as none: the static colors come back and the firmware timer rules.)
         let anim = animation::Config::load();
-        if let Some(mode) = anim.mode {
+        let anim_stamp = animation_mtime();
+        if let Some(mode) = anim.mode.filter(|_| cfg.mode != Mode::Off) {
             let on = lights_should_be_on(&cfg, inputs.idle, inputs.on_ac, inputs.lid_closed);
             let state = format!(
                 "animation={} on={} keepalive={} idle={} ac={}",
@@ -508,7 +523,9 @@ pub fn run() -> io::Result<()> {
                 }
             } else if let Some((_, rx)) = watcher.as_ref() {
                 // Lights are meant to sleep: idle, or on battery. Wake as soon as the user is back.
-                let _ = rx.recv_timeout(Duration::from_secs(1));
+                if let Err(RecvTimeoutError::Disconnected) = rx.recv_timeout(Duration::from_secs(1)) {
+                    std::thread::sleep(Duration::from_secs(1)); // compositor gone: do not spin
+                }
             } else {
                 std::thread::sleep(Duration::from_secs(1));
             }
@@ -519,9 +536,13 @@ pub fn run() -> io::Result<()> {
             was_animating = false;
             link.node = None;
             last_state.clear();
-            match send_saved_frame() {
-                Ok(()) => touch_magkey_write(),
-                Err(e) => eprintln!("keepalive: could not restore the static colors: {e}"),
+            // Only if the rules want the lights on now; otherwise they sleep and the static
+            // path brings the saved frame back as soon as they should be on.
+            if lights_should_be_on(&cfg, inputs.idle, inputs.on_ac, inputs.lid_closed) {
+                match send_saved_frame() {
+                    Ok(()) => touch_magkey_write(),
+                    Err(e) => eprintln!("keepalive: could not restore the static colors: {e}"),
+                }
             }
         }
 
@@ -548,7 +569,6 @@ pub fn run() -> io::Result<()> {
 
         // Sleep until the next tick, but wake early if the user becomes active
         // again (so sleeping lights come back right away) or the settings change.
-        let anim_stamp = animation_mtime();
         let lid_stamp = lid_closed();
         let mut waited = 0;
         while waited < TICK_SECS {
@@ -574,6 +594,8 @@ pub fn run() -> io::Result<()> {
 struct LidState {
     closed_since: Option<std::time::Instant>,
     logo_off: bool,
+    /// BIOS zones (mirror, base logo) this loop turned off for the lid.
+    wmi_off: Vec<wmi::Zone>,
 }
 
 /// Should the cover logo be dark now? Pure, for testing.
@@ -588,7 +610,8 @@ pub fn logo_should_be_off(cfg: &Config, lid_closed: bool, closed_for: Duration) 
     }
 }
 
-/// React to the lid: dim the cover logo per the settings, and wake the keyboard lights when it opens.
+/// React to the lid: dim the cover logo and the Infinity Mirror per the settings, and wake the
+/// keyboard lights when it opens.
 fn lid_step(cfg: &Config, closed: bool, lid: &mut LidState, link: &mut AnimLink) {
     let opened = !closed && lid.closed_since.is_some();
     if closed {
@@ -612,16 +635,33 @@ fn lid_step(cfg: &Config, closed: bool, lid: &mut LidState, link: &mut AnimLink)
             Err(e) => eprintln!("keepalive: could not restore the cover logo: {e}"),
         }
     }
-    if opened {
-        println!("keepalive: lid opened");
-        link.node = None;
-        // Wake the keyboard + WASD at once rather than at the next tick.
-        if lights_should_be_on(cfg, false, on_ac_power(), false) && animation::Config::load().mode.is_none() {
-            match send_saved_frame() {
-                Ok(()) => touch_magkey_write(),
-                Err(e) => eprintln!("keepalive: could not wake the lights: {e}"),
+    // The mirror and the base logo follow the same setting. Only touch a zone the user has on (one
+    // they turned off stays off) and only if the root helper works; the saved state is not changed,
+    // so opening the lid brings back exactly what was there.
+    for zone in [wmi::Zone::Mirror, wmi::Zone::BaseLogo] {
+        let saved = wmi::LightState::load(zone);
+        let off_by_us = lid.wmi_off.contains(&zone);
+        if want_off && !off_by_us && saved.on && zone.is_saved() {
+            if wmi::helper_ready() {
+                println!("keepalive: lid closed, turning the {} off", zone.label());
+                match wmi::write(&wmi::LightState { on: false, ..saved }.call()) {
+                    Ok(_) => lid.wmi_off.push(zone),
+                    Err(e) => eprintln!("keepalive: could not turn the {} off: {e}", zone.label()),
+                }
+            }
+        } else if !want_off && off_by_us {
+            println!("keepalive: restoring the {}", zone.label());
+            match wmi::write(&saved.call()) {
+                Ok(_) => lid.wmi_off.retain(|z| *z != zone),
+                Err(e) => eprintln!("keepalive: could not restore the {}: {e}", zone.label()),
             }
         }
+    }
+    if opened {
+        // The loop woke on the lid change and evaluates the rules right after this, so the keyboard
+        // and WASD come back on this iteration without a second write here.
+        println!("keepalive: lid opened");
+        link.node = None;
     }
 }
 

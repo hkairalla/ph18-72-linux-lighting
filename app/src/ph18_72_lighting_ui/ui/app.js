@@ -11,6 +11,8 @@ const api = (() => {
     run_daemon:        (args) => Promise.resolve({ ok: true, title: args[0], output: `mock: ${args.join(' ')}` }),
     get_animation: () => Promise.resolve({ mode: 'none', speed: 1, epoch_ms: 0, phase0: 0, keepalive_mode: 'active', service_active: true }),
     get_theme: () => Promise.resolve({}),
+    get_mirror: () => Promise.resolve({ on: true, mode: 'static', rgb: [0, 174, 199], brightness: 100, speed: 5, direction: 1, helper_ready: true }),
+    get_base_logo: () => Promise.resolve({ on: true, mode: 'static', rgb: [0, 174, 199], brightness: 100, speed: 5, direction: 1, helper_ready: true }),
     get_keepalive: () => Promise.resolve({ mode: 'active', minutes: 5, ac_only: true, lid_keys_off: true, lid_logo: 'timer', lid_logo_minutes: 10, screensaver_seconds: 150, service_active: true }),
     get_keyboard_view: (names) => Promise.resolve({
       baseline: [0, 0, 255],
@@ -464,9 +466,12 @@ function beginPreview() {
 
 // Adopt the daemon's animation state. Used at startup and on focus, so a window opened while an
 // animation is playing shows it, and one stopped from the CLI stops previewing.
+let animSeq = 0;   // bumped by start/stop: a sync answer from before the change is dropped
 async function syncAnimation() {
+  const seq = animSeq;
   let cfg;
   try { cfg = await api.get_animation(); } catch (_) { return; }
+  if (seq !== animSeq) return;
   if (!cfg || !cfg.mode) return;
   const note = document.getElementById('anim-note');
   if (note) {
@@ -489,16 +494,18 @@ async function syncAnimation() {
 }
 
 async function startAnim(mode) {
+  animSeq++;
   state.animMode = mode;
   state.animEpoch = Date.now();
   state.animPhase0 = 0;
   beginPreview();
   const r = await runDaemon(['set-animation', '--mode', mode, '--speed', state.animSpeed.toFixed(2)]);
-  // Adopt the daemon's clock (it stamped its own epoch).
-  if (r && r.ok) syncAnimation();
+  // Adopt the daemon's clock (it stamped its own epoch); keep-alive may have been switched on.
+  if (r && r.ok) { syncAnimation(); refreshKeepalive(); }
 }
 
 async function stopAnim({ restore = true, send = true } = {}) {
+  animSeq++;
   state.animRunning = false;
   showAnimRunning(false);
   if (send) await runDaemon(['set-animation', '--mode', 'none']);
@@ -677,6 +684,7 @@ function _initKeyboardPanelBody() {
 
   grid.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return; // left click only
+    grid.dataset.suppressClick = ''; // a drag released outside the grid never fired the click it was meant to suppress
     dragState = { startX: ev.clientX, startY: ev.clientY, boxEl: null, additive: ev.ctrlKey || ev.metaKey || ev.shiftKey };
   });
 
@@ -927,6 +935,81 @@ function initCoverPanel() {
   });
 }
 
+/* ── Infinity Mirror / Base Logo panels ──────────────────────────────
+   Two one-zone lights driven through the BIOS. No readback: the daemon remembers the last
+   state sent. Both panels have the same controls; `z` names the element-id prefixes and commands. */
+const WMI_ZONES = {
+  mirror: { vis: 'mirror-vis', note: 'mirror-note', mode: 'mirror-mode', effectRow: 'mirror-effect-row', speed: 'mirror-speed',
+            dir: 'mirror-dir', bri: 'mirror-brightness', sliders: ['mi-r', 'mi-g', 'mi-b', 'mi-swatch'],
+            apply: 'btn-mirror-apply', setBri: 'btn-mirror-brightness', off: 'btn-mirror-off', on: 'btn-mirror-on',
+            get: 'get_mirror', set: 'set-mirror' },
+  // The base logo is static only (its BIOS method has no effects), so it has no mode/speed/direction controls.
+  base:   { vis: 'base-vis', note: 'base-note', mode: null, effectRow: null, speed: null,
+            dir: null, bri: 'base-brightness', sliders: ['bl-r', 'bl-g', 'bl-b', 'bl-swatch'],
+            apply: 'btn-base-apply', setBri: 'btn-base-brightness', off: 'btn-base-off', on: 'btn-base-on',
+            get: 'get_base_logo', set: 'set-base-logo' },
+};
+
+function paintWmiZone(z, s) {
+  const vis = document.getElementById(z.vis);
+  const lit = s.on && s.brightness > 0;
+  vis.classList.toggle('lit', lit);
+  vis.classList.toggle('effect', lit && s.mode !== 'static');
+  const dim = s.brightness / 100;
+  // Color-cycling modes have no single color on the real light; show the accent for those.
+  const rgb = ['rainbow', 'neon'].includes(s.mode) ? null : s.rgb.map(v => Math.round(v * dim));
+  vis.style.setProperty('--mc', rgb ? rgb.join(' ') : 'var(--accent-rgb)');
+}
+
+async function refreshWmiZone(z) {
+  if (!BROWSER_DEV && !(window.pywebview && window.pywebview.api)) return;
+  let s;
+  try { s = await api[z.get](); } catch (err) { console.warn(z.get + ' failed', err); return; }
+  if (!s || !s.mode) return;
+  document.getElementById(z.note).hidden = s.helper_ready !== false;
+  if (z.mode) {
+    const sel = document.getElementById(z.mode);
+    if (document.activeElement !== sel) sel.value = s.mode;
+    document.getElementById(z.effectRow).hidden = s.mode === 'static';
+    const speed = document.getElementById(z.speed);
+    if (document.activeElement !== speed) speed.value = s.speed;
+    document.getElementById(z.dir).value = String(s.direction);
+  }
+  const bri = document.getElementById(z.bri);
+  if (document.activeElement !== bri) bri.value = s.on ? s.brightness : 0;
+  z.sliders.slice(0, 3).forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (document.activeElement !== el) { el.value = s.rgb[i]; el.dispatchEvent(new Event('input')); }
+  });
+  paintWmiZone(z, s);
+}
+
+function refreshMirror() { refreshWmiZone(WMI_ZONES.mirror); refreshWmiZone(WMI_ZONES.base); }
+
+function initWmiZonePanel(z) {
+  const getRgb = wireSliders(...z.sliders);
+  const modeSel = z.mode ? document.getElementById(z.mode) : null;
+  if (modeSel) modeSel.addEventListener('change', () => {
+    document.getElementById(z.effectRow).hidden = modeSel.value === 'static';
+  });
+  const apply = async (args) => { await runDaemon([z.set, ...args]); refreshWmiZone(z); };
+  document.getElementById(z.apply).addEventListener('click', () => {
+    const [r, g, b] = getRgb();
+    const args = ['--color', `${r},${g},${b}`, '--on', 'true'];
+    if (modeSel) {
+      const speed = Math.max(1, Math.min(9, parseInt(document.getElementById(z.speed).value, 10) || 5));
+      args.push('--mode', modeSel.value, '--speed', speed, '--direction', document.getElementById(z.dir).value);
+    }
+    apply(args);
+  });
+  document.getElementById(z.setBri).addEventListener('click', () =>
+    apply(['--brightness', document.getElementById(z.bri).value]));
+  document.getElementById(z.off).addEventListener('click', () => apply(['--on', 'false']));
+  document.getElementById(z.on).addEventListener('click', () => apply(['--on', 'true']));
+}
+
+function initMirrorPanel() { initWmiZonePanel(WMI_ZONES.mirror); initWmiZonePanel(WMI_ZONES.base); }
+
 /* ── Tab switching ───────────────────────────────────────────────────*/
 function initTabs() {
   document.querySelectorAll('.tab').forEach(tab => {
@@ -1049,6 +1132,7 @@ async function initBackend() {
   refreshKeepalive();
   refreshTheme();
   syncAnimation();
+  refreshMirror();
 }
 
 /* ── Boot ────────────────────────────────────────────────────────────*/
@@ -1059,12 +1143,13 @@ document.addEventListener('DOMContentLoaded', () => {
   initKeepalive();
   initMagkeyPanel();
   initCoverPanel();
+  initMirrorPanel();
   initSpeedDial();
   // pywebviewready fires once the Python API is injected; re-run badge check then.
   // Also call immediately for browser dev mode where there is no pywebview.
   initBackend();
   window.addEventListener('pywebviewready', initBackend);
   // The state can change outside the UI (CLI, restore service): resync on focus.
-  window.addEventListener('focus', () => { scheduleKeyColorRefresh(0); refreshKeepalive(); refreshTheme(); syncAnimation(); });
+  window.addEventListener('focus', () => { scheduleKeyColorRefresh(0); refreshKeepalive(); refreshTheme(); syncAnimation(); refreshMirror(); });
   setInterval(refreshTheme, 3000);   // pick up `omarchy theme set` while the window is open
 });

@@ -19,6 +19,8 @@ reverse-engineering scratchwork lives under git-ignored `testing/`.
 - Cover Logo (whole + left/middle/right segments + brightness).
 - Main keyboard whole-board color: any 24-bit RGB baseline (named presets `off`/`blue`/`red`/`green` are aliases).
 - Per-key keyboard colors (with the state-aware repaint model below).
+- Infinity Mirror (rear light bar) as one zone: mode / color / brightness / speed, via Acer WMI (below).
+- Base Logo: static color + brightness, via Acer WMI (below).
 
 ## MagKey persistence
 
@@ -49,9 +51,24 @@ sleep within the firmware's 30 s), `lid_logo` (`keep|off|timer`, default timer) 
 (default 10): the cover logo is set to brightness 0 and restored (last brightness saved in
 `~/.cache/ph18-lighting/cover-brightness`) when the lid opens. CLI: `set-keepalive --lid-keys-off --lid-logo
 --lid-logo-minutes`. Only matters when the machine stays awake with the lid shut (external monitor);
-otherwise logind suspends it. The Infinity Mirror and Base Logo cannot be controlled yet (issue #1/#14
-research), so they are not covered. Batch key commands: `set-keyboard-keys --keys a,b --color r,g,b`,
+otherwise logind suspends it. The mirror and the base logo follow the same setting. Batch key commands: `set-keyboard-keys --keys a,b --color r,g,b`,
 `clear-keyboard-keys --keys a,b`.
+
+## Infinity Mirror and Base Logo (Acer WMI, needs root helper)
+
+Neither is USB. `daemon/src/wmi.rs` builds one ACPI call per light for `\_SB.PC00.WMID.WMBH`:
+the mirror is method 0x14 with a 16-byte buffer `[mode, speed, brightness, 0, direction, R, G, B,
+03, 02, 0 x6]` (0xff = static; off = brightness 0; byte 9 = zone, 0x02 = mirror), the base logo is
+method 0x0c with `1 | R<<8 | G<<16 | B<<24 | brightness<<32 | 0x08<<40` (static only; black/bri 0
+= off). Details and what was verified: docs/PROTOCOL_NOTES.md. `/proc/acpi/call` (acpi_call-dkms)
+is root-only, so writes go through `sudo -n /usr/local/libexec/ph18-lighting-wmi <method> <arg>`, a
+tiny root helper (`daemon/src/bin/ph18-lighting-wmi.rs`) that accepts only those two calls (and
+only zone 0x02 / group 1); `omarchy/install.sh` step 4b installs it root-owned plus a sudoers
+NOPASSWD line. No readback exists, so the last state per light is saved in
+`~/.cache/ph18-lighting/{mirror,base-logo}-state`. CLI `set-mirror --mode --color --brightness
+--speed --direction --on`, `set-base-logo --color --brightness --on`, `get-*` (prints
+`helper_ready`), `repaint-*` (resume script, if a state file exists). The lid-closed `lid_logo`
+setting applies to both (keepalive `lid_step`). GUI: both tabs share `initWmiZonePanel` in app.js.
 
 ## Keyboard layout (GUI)
 

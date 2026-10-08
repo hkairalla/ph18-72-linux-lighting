@@ -43,9 +43,8 @@
     <nav class="tabs">
       <button class="tab active" data-panel="keyboard">Keyboard</button>
       <button class="tab"        data-panel="magkey">MagKey 3.0</button>
-      <!-- Base Logo and Infinity Mirror have no control path yet (issue #7): hidden until they do. -->
-      <button class="tab" data-panel="base-logo" hidden>Base Logo</button>
-      <button class="tab" data-panel="infinity" hidden>Infinity Mirror</button>
+      <button class="tab" data-panel="infinity">Infinity Mirror</button>
+      <button class="tab" data-panel="base-logo">Base Logo</button>
       <button class="tab"        data-panel="cover-logo">Cover Logo</button>
       <div class="tabs-end">
         <span class="backend-badge" id="backend-badge" hidden title="Demo mode: nothing you do here reaches the lights">Demo mode</span>
@@ -111,7 +110,7 @@
           <label class="ka-check"><input type="checkbox" id="ka-ac-only" checked> Only on AC power</label>
           <label class="ka-check" title="With the lid closed the keyboard and WASD lights are left to go to sleep"><input type="checkbox" id="ka-lid-keys" checked> Keys off when the lid is closed</label>
           <div class="ka-minutes">
-            <label for="ka-lid-logo">Cover logo, lid closed</label>
+            <label for="ka-lid-logo">Logo &amp; mirror, lid closed</label>
             <select class="select-anim" id="ka-lid-logo">
               <option value="keep">Stay on</option>
               <option value="off">Turn off</option>
@@ -356,18 +355,105 @@
       </div>
 
       <!-- Placeholders ──────────────────────────────────────── -->
-      <div class="panel" id="panel-base-logo">
-        <div class="placeholder">
-          <div class="placeholder-icon">⬡</div>
-          <div class="placeholder-title">Base Logo</div>
-          <div class="placeholder-sub">In development — no confirmed control path yet</div>
+      <div class="panel" id="panel-infinity">
+        <div class="panel-main cover-main">
+          <div class="section-label">Rear light bar</div>
+          <div class="mirror-vis" id="mirror-vis"><span class="mirror-word">H E L I O S</span></div>
+          <div class="anim-hint">The bar is driven by the BIOS (Acer WMI), as one zone. The BIOS cannot be read back, so this shows what was last sent.</div>
+          <div class="anim-hint warn" id="mirror-note" hidden>The root helper is not set up, so nothing reaches the bar. Run omarchy/install.sh (needs sudo; and the acpi_call-dkms package).</div>
+          <div class="brightness-row">
+            <span class="icon-dim">☀</span>
+            <input type="range" id="mirror-brightness" min="0" max="100" value="100">
+            <span class="icon-bright">☀</span>
+            <button class="btn-small" id="btn-mirror-brightness">Set</button>
+          </div>
+          <div class="btn-row">
+            <button class="btn-preset" id="btn-mirror-off">Off</button>
+            <button class="btn-preset" id="btn-mirror-on">On</button>
+          </div>
+        </div>
+        <div class="panel-sidebar">
+          <div class="sidebar-title">Infinity Mirror</div>
+          <div class="section-label">Mode</div>
+          <select class="select-anim" id="mirror-mode">
+            <option value="static">Static</option>
+            <option value="breathing">Breathing</option>
+            <option value="neon">Neon</option>
+            <option value="rainbow">Rainbow</option>
+            <option value="wave">Wave</option>
+            <option value="ripple">Ripple</option>
+            <option value="scanner">Scanner</option>
+            <option value="strobe">Strobe</option>
+          </select>
+          <div class="ka-minutes" id="mirror-effect-row">
+            <label for="mirror-speed">Speed</label>
+            <input type="number" id="mirror-speed" min="1" max="9" value="5">
+            <label for="mirror-dir">Dir</label>
+            <select class="select-anim" id="mirror-dir"><option value="1">1</option><option value="2">2</option></select>
+          </div>
+          <div class="divider"></div>
+          <div class="section-label">Color</div>
+          <div class="slider-group">
+            <div class="slider-row">
+              <span class="ch r">R</span>
+              <input type="range" class="slider red"   id="mi-r" min="0" max="255" value="0">
+              <span class="val" id="mi-r-val">0</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch g">G</span>
+              <input type="range" class="slider green" id="mi-g" min="0" max="255" value="174">
+              <span class="val" id="mi-g-val">174</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch b">B</span>
+              <input type="range" class="slider blue"  id="mi-b" min="0" max="255" value="199">
+              <span class="val" id="mi-b-val">199</span>
+            </div>
+          </div>
+          <div class="color-swatch" id="mi-swatch"></div>
+          <button class="btn-primary" id="btn-mirror-apply">Apply</button>
         </div>
       </div>
-      <div class="panel" id="panel-infinity">
-        <div class="placeholder">
-          <div class="placeholder-icon">◈</div>
-          <div class="placeholder-title">Infinity Mirror</div>
-          <div class="placeholder-sub">In development — no confirmed control path yet</div>
+
+      <div class="panel" id="panel-base-logo">
+        <div class="panel-main cover-main">
+          <div class="section-label">Base logo</div>
+          <div class="base-vis" id="base-vis"><span class="base-word">H E L I O S</span></div>
+          <div class="anim-hint">The logo is driven by the BIOS (Acer WMI): one zone, static color and brightness. The BIOS cannot be read back, so this shows what was last sent.</div>
+          <div class="anim-hint warn" id="base-note" hidden>The root helper is not set up, so nothing reaches the logo. Run omarchy/install.sh (needs sudo; and the acpi_call-dkms package).</div>
+          <div class="brightness-row">
+            <span class="icon-dim">☀</span>
+            <input type="range" id="base-brightness" min="0" max="100" value="100">
+            <span class="icon-bright">☀</span>
+            <button class="btn-small" id="btn-base-brightness">Set</button>
+          </div>
+          <div class="btn-row">
+            <button class="btn-preset" id="btn-base-off">Off</button>
+            <button class="btn-preset" id="btn-base-on">On</button>
+          </div>
+        </div>
+        <div class="panel-sidebar">
+          <div class="sidebar-title">Base Logo</div>
+          <div class="section-label">Color</div>
+          <div class="slider-group">
+            <div class="slider-row">
+              <span class="ch r">R</span>
+              <input type="range" class="slider red"   id="bl-r" min="0" max="255" value="0">
+              <span class="val" id="bl-r-val">0</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch g">G</span>
+              <input type="range" class="slider green" id="bl-g" min="0" max="255" value="174">
+              <span class="val" id="bl-g-val">174</span>
+            </div>
+            <div class="slider-row">
+              <span class="ch b">B</span>
+              <input type="range" class="slider blue"  id="bl-b" min="0" max="255" value="199">
+              <span class="val" id="bl-b-val">199</span>
+            </div>
+          </div>
+          <div class="color-swatch" id="bl-swatch"></div>
+          <button class="btn-primary" id="btn-base-apply">Apply</button>
         </div>
       </div>
 

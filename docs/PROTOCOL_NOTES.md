@@ -137,24 +137,45 @@ one succeeds.
   (BGR order) and `08 01 01 05 <level> 01 00 ..` for brightness.
 - Sending `08 01 01 <op> ...` for ops 1-10 only behaved as brightness; no other effect opcodes were found.
 
-## Infinity Mirror (rear light bar): works via Acer WMI (2026-10)
+## Infinity Mirror and Base Logo: Acer WMI (2026-10)
 
-PredatorSense's "Infinity Mirror" tab is the rear bar with the HELIOS lettering (7 zones in the app). It is **not
-USB**: the Windows captures contain no writes for it. It is driven through the Acer gaming WMI interface,
-`\_SB.PC00.WMID.WMBH` instance 0, **method 0x14 (SetGamingKBBacklight)** with a 16-byte buffer, layout taken from
-the community Venator driver (PH16-71) and confirmed on the PH18-72:
+Neither is USB (the Windows captures contain no writes for them). Both are driven through the Acer
+gaming WMI interface, ACPI method `\_SB.PC00.WMID.WMBH(instance 0, method, input)` (class
+`AcerGamingFunction`), reachable on Linux only through the `acpi_call` module's root-only
+`/proc/acpi/call`. The daemon uses a tiny root helper (`ph18-lighting-wmi`, sudoers NOPASSWD) for it.
 
-`[mode, speed, brightness, 0x00, direction, R, G, B, 0x03, 0x02, 0 x6]`
+### Infinity Mirror (rear light bar, the HELIOS strip): method 0x14 `SetGamingKBBacklight`
 
-- Confirmed on hardware: `ff 05 64 00 01 ff 00 00 03 02 ...` (mode 0xff = static, red) turned the whole bar red.
-- **Off = static (0xff) with brightness 0**: `ff 00 00 00 01 ff 00 00 03 02 ...`. Mode `0x00` ("off" in Venator) did NOT turn
-  it off here, and a black static color at full brightness kept it off once it was already off.
-- Venator's mode ids: 0 off, 1 breathing, 2 neon, 3 rainbow, 4 wave, 5 ripple, 6 scanner, 7 strobe, 0xff static
-  (not yet tried here). Whole-bar only: no per-zone writes are known.
-- `GetGamingKBBacklight(1)` (method 0x15) does not reflect writes (it kept returning `00 00 05 64 00 01 00 ae c7`),
-  so the state cannot be read back.
-- Needs root (`/proc/acpi/call`, the `acpi_call` module). A normal-user path (helper + polkit/sudoers) is still to do.
-- The same earlier note about Acer WMI getters stands: the LED getters expose nothing per zone.
+16-byte buffer (layout from the community Venator driver for the PH16-71, confirmed here):
+
+`[mode, speed, brightness, 0x00, direction, R, G, B, 0x03, zone, 0 x6]`
+
+| Field | Values |
+| --- | --- |
+| mode | `0xff` static; `0x01` cycles colors with a blink between them; `0x02` fades between colors; `0x03` several colors changing along the bar; `0x04` seven static colors, one per zone (the Venator names breathing / neon / rainbow / wave fit); `0x05`-`0x07` (ripple / scanner / strobe) accepted but **not yet observed** |
+| speed | 1-9 |
+| brightness | 0-100; **off = static with brightness 0** (mode `0x00`, "off" in Venator, does nothing here) |
+| direction | 1 or 2 (effect modes; not yet observed) |
+| zone (byte 9) | `0x02` = the mirror. `0x01` only switches the Base Logo on (ignores everything else). `0x03` also hit the mirror. `0x00`, `0x04` are rejected (status 1) |
+
+Whole-bar only: PredatorSense shows 7 zones but no per-zone write is known (byte 3 and byte 8
+variants did nothing). `GetGamingKBBacklight` (0x15) does not reflect writes, so there is no readback.
+
+### Base Logo (under the keyboard): method 0x0c `SetGamingLEDColor`
+
+64-bit input `group | R<<8 | G<<16 | B<<24 | brightness<<32 | 0x08<<40`, group = 1 (the only LED
+group: 2 and 3 are rejected). Confirmed: red, green, black (= off), the firmware default cyan
+`00,ae,c7`; brightness `0x64` looked brighter than `0x50`; brightness 0 is also dark.
+`GetGamingLEDColor(1)` (0x0d) reads back `{status, R, G, B, 0x50, 0x08, 0, 0}` with the color
+just written (the brightness byte stays 0x50). `SetGamingLEDBehavior` (0x0a) with `group | value<<8`
+changed nothing visible (and left `GetGamingLEDBehavior(1)` reading 0), so it is left alone; the
+logo is static-only for now.
+
+### Not the mirror / base logo
+
+The LED getters (`GetGamingLED` 4, `GetGamingRgbKb` 7, `GetGamingLEDBehavior` 11, `GetGamingLEDColor`
+13, `GetGamingSysInfo` 5, `GetGamingProfileSetting` 9) expose no per-zone state beyond the base
+logo's color; the keyboard and MagKeys stay USB.
 
 ## Not Useful So Far
 

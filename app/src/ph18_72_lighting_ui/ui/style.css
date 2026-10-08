@@ -869,3 +869,28 @@ body {
 .anim-hint { margin-top: 8px; font-size: 11px; line-height: 1.4; color: var(--text-dim); }
 .anim-hint.warn { color: #ff6b6b; opacity: 1; }
 .anim-hint[hidden] { display: none; }
+
+/* ── Infinity Mirror ───────────────────────────────────────────────── */
+.mirror-vis {
+  --mc: var(--accent-rgb);
+  width: 100%;
+  max-width: 520px;
+  height: 34px;
+  margin: 24px 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-mid);
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: box-shadow 0.3s, border-color 0.3s;
+}
+.mirror-vis.lit {
+  border-color: rgb(var(--mc));
+  box-shadow: 0 0 18px rgb(var(--mc) / 0.55), inset 0 0 14px rgb(var(--mc) / 0.35);
+}
+.mirror-word { font-size: 11px; letter-spacing: 0.3em; color: var(--text-dim); }
+.mirror-vis.lit .mirror-word { color: rgb(var(--mc)); }
+.mirror-vis.effect { animation: mirror-pulse 2.4s ease-in-out infinite; }
+@keyframes mirror-pulse { 50% { box-shadow: 0 0 6px rgb(var(--mc) / 0.25), inset 0 0 4px rgb(var(--mc) / 0.15); } }
+.base-vis { max-width: 220px; height: 60px; border-radius: 12px; }
